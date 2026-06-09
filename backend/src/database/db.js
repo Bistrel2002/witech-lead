@@ -143,6 +143,7 @@ async function initSqliteDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       website TEXT,
@@ -152,7 +153,8 @@ async function initSqliteDb(db) {
       status TEXT DEFAULT 'New',
       city TEXT,
       notes TEXT,
-      scraped_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      scraped_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
@@ -181,10 +183,12 @@ async function initSqliteDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
       name TEXT NOT NULL,
       subject TEXT NOT NULL,
       body TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
@@ -192,6 +196,7 @@ async function initSqliteDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
       name TEXT NOT NULL,
       template_id INTEGER,
       status TEXT DEFAULT 'Pending',
@@ -200,7 +205,8 @@ async function initSqliteDb(db) {
       failed_count INTEGER DEFAULT 0,
       channel TEXT DEFAULT 'email',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(template_id) REFERENCES templates(id)
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(template_id) REFERENCES templates(id) ON DELETE SET NULL
     )
   `);
 
@@ -287,6 +293,33 @@ async function initSqliteDb(db) {
       "Bonjour {{company_name}},\n\nJe suis tombé sur votre entreprise et je me demandais comment vous gériez actuellement vos flux de données et vos tâches administratives quotidiennes.\n\nWi'Tech est spécialisée dans l'automatisation des processus métiers à l'aide d'outils performants comme n8n et Power Automate. Nous aidons les professionnels à connecter leurs outils (CRM, emails, facturation) pour éliminer les tâches manuelles répétitives.\n\nSi vous souhaitez libérer du temps pour votre cœur de métier, nous pouvons réaliser un audit gratuit de vos processus.\n\nRépondez simplement à cet email pour planifier un échange.\n\nCordialement,\n\n{{sender_signature}}"
     );
   }
+
+  // Migration: add user_id column to leads, templates, and campaigns for SQLite
+  const userIdColumns = [
+    { table: 'leads', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
+    { table: 'templates', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
+    { table: 'campaigns', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' }
+  ];
+
+  for (const m of userIdColumns) {
+    try {
+      await db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.colDef}`);
+    } catch (_) {
+      // Column already exists – ignore
+    }
+  }
+
+  // Backfill existing NULL user_ids to the oldest registered user (admin)
+  try {
+    const oldestUser = await db.get('SELECT id FROM users ORDER BY id ASC LIMIT 1');
+    if (oldestUser && oldestUser.id) {
+      await db.run('UPDATE leads SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
+      await db.run('UPDATE templates SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
+      await db.run('UPDATE campaigns SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
+    }
+  } catch (err) {
+    console.error('Error backfilling user_id for SQLite:', err);
+  }
 }
 
 async function initPostgresDb(db) {
@@ -308,6 +341,7 @@ async function initPostgresDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
       id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       name VARCHAR(255) NOT NULL,
       category VARCHAR(100) NOT NULL,
       website VARCHAR(255),
@@ -334,6 +368,7 @@ async function initPostgresDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS templates (
       id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       name VARCHAR(255) NOT NULL,
       subject VARCHAR(255) NOT NULL,
       body TEXT NOT NULL,
@@ -345,6 +380,7 @@ async function initPostgresDb(db) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       name VARCHAR(255) NOT NULL,
       template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
       status VARCHAR(50) DEFAULT 'Pending',
@@ -438,5 +474,33 @@ async function initPostgresDb(db) {
       "Gagnez 10h par semaine sur vos tâches répétitives - {{company_name}}",
       "Bonjour {{company_name}},\n\nJe suis tombé sur votre entreprise et je me demandais comment vous gériez actuellement vos flux de données et vos tâches administratives quotidiennes.\n\nWi'Tech est spécialisée dans l'automatisation des processus métiers à l'aide d'outils performants comme n8n et Power Automate. Nous aidons les professionnels à connecter leurs outils (CRM, emails, facturation) pour éliminer les tâches manuelles répétitives.\n\nSi vous souhaitez libérer du temps pour votre cœur de métier, nous pouvons réaliser un audit gratuit de vos processus.\n\nRépondez simplement à cet email pour planifier un échange.\n\nCordialement,\n\n{{sender_signature}}"
     );
+  }
+
+  // Migration: add user_id column to leads, templates, and campaigns for PostgreSQL
+  const userIdColumns = [
+    { table: 'leads', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
+    { table: 'templates', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
+    { table: 'campaigns', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' }
+  ];
+
+  for (const m of userIdColumns) {
+    try {
+      // In PG we can use ADD COLUMN IF NOT EXISTS or catch the error
+      await db.exec(`ALTER TABLE ${m.table} ADD COLUMN IF NOT EXISTS user_id ${m.colDef}`);
+    } catch (_) {
+      // Column already exists – ignore
+    }
+  }
+
+  // Backfill existing NULL user_ids to the oldest registered user (admin) in PostgreSQL
+  try {
+    const oldestUser = await db.get('SELECT id FROM users ORDER BY id ASC LIMIT 1');
+    if (oldestUser && oldestUser.id) {
+      await db.run('UPDATE leads SET user_id = $1 WHERE user_id IS NULL', oldestUser.id);
+      await db.run('UPDATE templates SET user_id = $1 WHERE user_id IS NULL', oldestUser.id);
+      await db.run('UPDATE campaigns SET user_id = $1 WHERE user_id IS NULL', oldestUser.id);
+    }
+  } catch (err) {
+    console.error('Error backfilling user_id for PostgreSQL:', err);
   }
 }

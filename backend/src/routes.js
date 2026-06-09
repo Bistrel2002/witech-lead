@@ -13,7 +13,7 @@ export async function eliminateDuplicates(db) {
     WHERE id NOT IN (
       SELECT MIN(id) 
       FROM leads 
-      GROUP BY name, category, COALESCE(website, ''), COALESCE(phone, ''), COALESCE(city, '')
+      GROUP BY user_id, name, category, COALESCE(website, ''), COALESCE(phone, ''), COALESCE(city, '')
     )
   `);
   const afterCount = await db.get('SELECT COUNT(*) as count FROM leads');
@@ -150,19 +150,19 @@ router.all('/leads/french-db-lookup', async (req, res) => {
     const processedLeads = [];
     for (const biz of businesses) {
       let targetLead = await db.get(
-        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?)', 
-        biz.name, biz.category, biz.city || null, biz.website || null
+        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?', 
+        biz.name, biz.category, biz.city || null, biz.website || null, req.user.id
       );
 
       // Save to main DB if requested or linking to campaign
       if (!targetLead && (saveToDb !== false || campaignId)) {
         const insertRes = await db.run(
           `INSERT INTO leads (
-            name, category, website, phone, email, google_maps_url, city, notes, status, 
+            user_id, name, category, website, phone, email, google_maps_url, city, notes, status, 
             rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
             social_handles, load_time_ms, tech_stack
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          biz.name, biz.category, biz.website, biz.phone, biz.email, biz.google_maps_url, 
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          req.user.id, biz.name, biz.category, biz.website, biz.phone, biz.email, biz.google_maps_url, 
           biz.city, biz.notes || 'Prospect issu de la base nationale.', 'New', biz.rating || null, biz.review_count || 0, biz.address || null,
           biz.has_ssl || 0, biz.is_mobile_friendly || 0, biz.has_chat_widget || 0,
           biz.social_handles || '{}', biz.load_time_ms || null, biz.tech_stack || null
@@ -352,8 +352,8 @@ router.get('/leads', async (req, res) => {
     const db = await getDb();
     const { category, city, status, hasEmail, hasWebsite } = req.query;
     
-    let query = 'SELECT * FROM leads WHERE 1=1';
-    const params = [];
+    let query = 'SELECT * FROM leads WHERE user_id = ?';
+    const params = [req.user.id];
 
     if (category) {
       query += ' AND category = ?';
@@ -392,8 +392,8 @@ router.get('/leads/export/csv', async (req, res) => {
     const db = await getDb();
     const { category, city, status, hasEmail, hasWebsite } = req.query;
 
-    let query = 'SELECT * FROM leads WHERE 1=1';
-    const params = [];
+    let query = 'SELECT * FROM leads WHERE user_id = ?';
+    const params = [req.user.id];
 
     if (category) {
       query += ' AND category = ?';
@@ -467,23 +467,24 @@ router.post('/leads', async (req, res) => {
   try {
     const db = await getDb();
 
-    // Check duplicate before manual creation
+    // Check duplicate before manual creation for this specific user
     const existing = await db.get(
       `SELECT id FROM leads 
-       WHERE name = ? AND category = ? AND (city = ? OR website = ?)`,
+       WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?`,
       name,
       category,
       city || null,
-      website || null
+      website || null,
+      req.user.id
     );
     if (existing) {
-      return res.status(400).json({ error: 'Ce prospect existe déjà dans la base de données.' });
+      return res.status(400).json({ error: 'Ce prospect existe déjà dans votre base de données.' });
     }
 
     const result = await db.run(
-      `INSERT INTO leads (name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, has_ssl || 0, is_mobile_friendly || 0, has_chat_widget || 0, social_handles || null, load_time_ms || null, tech_stack || null
+      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, has_ssl || 0, is_mobile_friendly || 0, has_chat_widget || 0, social_handles || null, load_time_ms || null, tech_stack || null
     );
     const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
     res.status(201).json(newLead);
@@ -499,13 +500,20 @@ router.put('/leads/:id', async (req, res) => {
 
   try {
     const db = await getDb();
+    
+    // Verify lead ownership first
+    const lead = await db.get('SELECT id FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Prospect introuvable ou non autorisé.' });
+    }
+
     await db.run(
       `UPDATE leads 
        SET name = ?, category = ?, website = ?, phone = ?, email = ?, status = ?, city = ?, notes = ?,
            rating = ?, review_count = ?, address = ?, has_ssl = ?, is_mobile_friendly = ?,
            has_chat_widget = ?, social_handles = ?, load_time_ms = ?, tech_stack = ?
-       WHERE id = ?`,
-      name, category, website, phone, email, status, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack, id
+       WHERE id = ? AND user_id = ?`,
+      name, category, website, phone, email, status, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack, id, req.user.id
     );
     const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', id);
     res.json(updatedLead);
@@ -519,9 +527,16 @@ router.delete('/leads/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
+    
+    // Verify lead ownership first
+    const lead = await db.get('SELECT id FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Prospect introuvable ou non autorisé.' });
+    }
+
     // Delete associated discussions first to prevent orphaned records
     await db.run('DELETE FROM lead_discussions WHERE lead_id = ?', id);
-    await db.run('DELETE FROM leads WHERE id = ?', id);
+    await db.run('DELETE FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
     res.json({ message: 'Lead deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -533,6 +548,13 @@ router.get('/leads/:id/discussions', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
+
+    // Verify lead ownership first
+    const lead = await db.get('SELECT id FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Prospect introuvable ou non autorisé.' });
+    }
+
     const discussions = await db.all('SELECT * FROM lead_discussions WHERE lead_id = ? ORDER BY created_at DESC', id);
     res.json(discussions);
   } catch (error) {
@@ -549,6 +571,13 @@ router.post('/leads/:id/discussions', async (req, res) => {
   }
   try {
     const db = await getDb();
+
+    // Verify lead ownership first
+    const lead = await db.get('SELECT id FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!lead) {
+      return res.status(404).json({ error: 'Prospect introuvable ou non autorisé.' });
+    }
+
     const result = await db.run(
       'INSERT INTO lead_discussions (lead_id, type, content, created_at) VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))',
       id, type, content, created_at || null
@@ -565,6 +594,16 @@ router.delete('/leads/discussions/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
+
+    // Verify lead ownership of the discussion's parent lead first
+    const discussion = await db.get(
+      'SELECT d.id FROM lead_discussions d JOIN leads l ON d.lead_id = l.id WHERE d.id = ? AND l.user_id = ?',
+      id, req.user.id
+    );
+    if (!discussion) {
+      return res.status(404).json({ error: 'Note introuvable ou non autorisée.' });
+    }
+
     await db.run('DELETE FROM lead_discussions WHERE id = ?', id);
     res.json({ message: 'Discussion entry deleted successfully' });
   } catch (error) {
@@ -593,14 +632,15 @@ router.post('/leads/import', async (req, res) => {
     for (const lead of leadsToInsert) {
       if (!lead.name || !lead.category) continue; // Skip malformed rows
 
-      // Strict duplicate checking: skip if a lead with same name + category + (city OR website) exists
+      // Strict duplicate checking: skip if a lead with same name + category + (city OR website) exists for this user
       const existing = await db.get(
         `SELECT id FROM leads 
-         WHERE name = ? AND category = ? AND (city = ? OR website = ?)`,
+         WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?`,
         lead.name,
         lead.category,
         lead.city || null,
-        lead.website || null
+        lead.website || null,
+        req.user.id
       );
 
       if (existing) {
@@ -616,11 +656,12 @@ router.post('/leads/import', async (req, res) => {
 
       const result = await db.run(
         `INSERT INTO leads (
-          name, category, website, phone, email, google_maps_url, city, notes, status,
+          user_id, name, category, website, phone, email, google_maps_url, city, notes, status,
           rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget,
           social_handles, load_time_ms, tech_stack
         ) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        req.user.id,
         lead.name,
         lead.category,
         lead.website || null,
@@ -679,21 +720,21 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
 
     const processedLeads = [];
     for (const lead of leads) {
-      // 1. Check duplicate in local CRM db
+      // 1. Check duplicate in local CRM db for this specific user
       let targetLead = await db.get(
-        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?)', 
-        lead.name, lead.category, lead.city || null, lead.website || null
+        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?', 
+        lead.name, lead.category, lead.city || null, lead.website || null, req.user.id
       );
 
       // 2. Insert to DB if requested or if it doesn't exist and we need to link it to a campaign
       if (!targetLead && (saveToDb !== false || campaignId)) {
         const insertRes = await db.run(
           `INSERT INTO leads (
-            name, category, website, phone, email, google_maps_url, city, notes, status, 
+            user_id, name, category, website, phone, email, google_maps_url, city, notes, status, 
             rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
             social_handles, load_time_ms, tech_stack
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          lead.name, lead.category, lead.website, lead.phone, lead.email, lead.google_maps_url, 
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          req.user.id, lead.name, lead.category, lead.website, lead.phone, lead.email, lead.google_maps_url, 
           lead.city, lead.notes, 'New', lead.rating || null, lead.review_count || 0, lead.address || null,
           lead.has_ssl || 0, lead.is_mobile_friendly || 0, lead.has_chat_widget || 0,
           lead.social_handles || '{}', lead.load_time_ms || null, lead.tech_stack || null
@@ -763,7 +804,7 @@ router.post('/leads/:id/scrape', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    const lead = await db.get('SELECT * FROM leads WHERE id = ?', id);
+    const lead = await db.get('SELECT * FROM leads WHERE id = ? AND user_id = ?', id, req.user.id);
     
     if (!lead) {
       return res.status(404).json({ error: 'Lead not found' });
@@ -795,7 +836,7 @@ router.post('/leads/:id/scrape', async (req, res) => {
            has_chat_widget = ?,
            tech_stack = COALESCE(?, tech_stack),
            load_time_ms = ?
-       WHERE id = ?`,
+       WHERE id = ? AND user_id = ?`,
       scrapedData.email,
       scrapedData.phone,
       newNotes,
@@ -804,7 +845,8 @@ router.post('/leads/:id/scrape', async (req, res) => {
       scrapedData.has_chat_widget,
       scrapedData.tech_stack,
       scrapedData.load_time_ms,
-      id
+      id,
+      req.user.id
     );
 
     const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', id);
@@ -823,7 +865,7 @@ router.post('/leads/:id/scrape', async (req, res) => {
 router.get('/templates', async (req, res) => {
   try {
     const db = await getDb();
-    const templates = await db.all('SELECT * FROM templates ORDER BY id DESC');
+    const templates = await db.all('SELECT * FROM templates WHERE user_id = ? ORDER BY id DESC', req.user.id);
     res.json(templates);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -838,8 +880,8 @@ router.post('/templates', async (req, res) => {
   try {
     const db = await getDb();
     const result = await db.run(
-      'INSERT INTO templates (name, subject, body) VALUES (?, ?, ?)',
-      name, subject, body
+      'INSERT INTO templates (user_id, name, subject, body) VALUES (?, ?, ?, ?)',
+      req.user.id, name, subject, body
     );
     const newTemplate = await db.get('SELECT * FROM templates WHERE id = ?', result.lastID);
     res.status(201).json(newTemplate);
@@ -853,9 +895,16 @@ router.put('/templates/:id', async (req, res) => {
   const { name, subject, body } = req.body;
   try {
     const db = await getDb();
+    
+    // Verify template ownership first
+    const template = await db.get('SELECT id FROM templates WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!template) {
+      return res.status(404).json({ error: 'Modèle introuvable ou non autorisé.' });
+    }
+
     await db.run(
-      'UPDATE templates SET name = ?, subject = ?, body = ? WHERE id = ?',
-      name, subject, body, id
+      'UPDATE templates SET name = ?, subject = ?, body = ? WHERE id = ? AND user_id = ?',
+      name, subject, body, id, req.user.id
     );
     const updated = await db.get('SELECT * FROM templates WHERE id = ?', id);
     res.json(updated);
@@ -868,7 +917,14 @@ router.delete('/templates/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    await db.run('DELETE FROM templates WHERE id = ?', id);
+
+    // Verify template ownership first
+    const template = await db.get('SELECT id FROM templates WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!template) {
+      return res.status(404).json({ error: 'Modèle introuvable ou non autorisé.' });
+    }
+
+    await db.run('DELETE FROM templates WHERE id = ? AND user_id = ?', id, req.user.id);
     res.json({ message: 'Template deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -888,8 +944,9 @@ router.get('/campaigns', async (req, res) => {
       SELECT c.*, t.name as template_name 
       FROM campaigns c 
       LEFT JOIN templates t ON c.template_id = t.id 
+      WHERE c.user_id = ?
       ORDER BY c.id DESC
-    `);
+    `, req.user.id);
     res.json(campaigns);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -905,16 +962,22 @@ router.post('/campaigns', async (req, res) => {
 
   try {
     const db = await getDb();
+
+    // Verify template ownership first
+    const template = await db.get('SELECT id FROM templates WHERE id = ? AND user_id = ?', template_id, req.user.id);
+    if (!template) {
+      return res.status(404).json({ error: 'Modèle introuvable ou non autorisé.' });
+    }
     
-    // Determine target prospects
+    // Determine target prospects belonging to this user
     let targets = [];
     if (lead_ids && Array.isArray(lead_ids)) {
       targets = await db.all(
-        `SELECT id FROM leads WHERE id IN (${lead_ids.map(() => '?').join(',')})`,
-        ...lead_ids
+        `SELECT id FROM leads WHERE id IN (${lead_ids.map(() => '?').join(',')}) AND user_id = ?`,
+        ...lead_ids, req.user.id
       );
     } else if (category) {
-      targets = await db.all('SELECT id FROM leads WHERE category = ?', category);
+      targets = await db.all('SELECT id FROM leads WHERE category = ? AND user_id = ?', category, req.user.id);
     } else {
       return res.status(400).json({ error: 'Must provide either lead_ids or a category' });
     }
@@ -925,8 +988,8 @@ router.post('/campaigns', async (req, res) => {
 
     // Insert Campaign
     const result = await db.run(
-      'INSERT INTO campaigns (name, template_id, total_leads, channel) VALUES (?, ?, ?, ?)',
-      name, template_id, targets.length, channel || 'email'
+      'INSERT INTO campaigns (user_id, name, template_id, total_leads, channel) VALUES (?, ?, ?, ?, ?)',
+      req.user.id, name, template_id, targets.length, channel || 'email'
     );
     const campaignId = result.lastID;
 
@@ -954,8 +1017,8 @@ router.get('/campaigns/:id', async (req, res) => {
       SELECT c.*, t.name as template_name 
       FROM campaigns c 
       LEFT JOIN templates t ON c.template_id = t.id 
-      WHERE c.id = ?
-    `, id);
+      WHERE c.id = ? AND c.user_id = ?
+    `, id, req.user.id);
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
@@ -980,13 +1043,13 @@ router.post('/campaigns/:id/start', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ?', id);
+    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ? AND user_id = ?', id, req.user.id);
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
     // Update status to Active
-    await db.run('UPDATE campaigns SET status = "Active" WHERE id = ?', id);
+    await db.run('UPDATE campaigns SET status = "Active" WHERE id = ? AND user_id = ?', id, req.user.id);
     
     // Trigger in the background
     runCampaignBackground(parseInt(id));
@@ -1002,7 +1065,12 @@ router.post('/campaigns/:id/pause', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    await db.run('UPDATE campaigns SET status = "Paused" WHERE id = ?', id);
+    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    await db.run('UPDATE campaigns SET status = "Paused" WHERE id = ? AND user_id = ?', id, req.user.id);
     res.json({ message: 'Campaign paused' });
   } catch (error) {
     res.status(500).json({ error: error.message });
