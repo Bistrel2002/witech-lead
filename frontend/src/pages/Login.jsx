@@ -39,6 +39,10 @@ export default function Login({ apiHost, onLoginSuccess }) {
   };
 
   const handleOAuth = (provider) => {
+    if (provider === 'apple') {
+      setError("La connexion avec Apple sera disponible dans la prochaine version.");
+      return;
+    }
     const redirectUri = encodeURIComponent(window.location.origin);
     window.location.href = `${apiHost}/api/auth/${provider}?redirect_uri=${redirectUri}`;
   };
