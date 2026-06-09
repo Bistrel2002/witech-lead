@@ -21,6 +21,7 @@ import Login from './pages/Login';
 import AdminPanel from './pages/AdminPanel';
 import TeamSpace from './pages/TeamSpace';
 
+// API Host configuration for production (Render) and development (localhost)
 const API_HOST = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // Dynamic Fallback leads for premium initial visual seeding
