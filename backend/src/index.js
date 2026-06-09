@@ -1,8 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import apiRouter from './routes.js';
+import authRouter from './routes/authRoutes.js';
+import portalRouter from './routes/portalRoutes.js';
 import { getDb } from './database/db.js';
+import { authenticateUser } from './middlewares/authMiddleware.js';
 
 dotenv.config();
 
@@ -15,9 +19,16 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(cookieParser(process.env.JWT_SECRET || 'witech-secret'));
 
-// API Routes
-app.use('/api', apiRouter);
+// Auth Routes (Public)
+app.use('/api/auth', authRouter);
+
+// Portal Routes (Password/Role restricted)
+app.use('/api/portal', portalRouter);
+
+// API Routes (General CRM operations - Protected by User Login)
+app.use('/api', authenticateUser, apiRouter);
 
 // Health Check / Root route
 app.get('/', (req, res) => {
@@ -27,7 +38,7 @@ app.get('/', (req, res) => {
 // Start Server and Init DB
 async function bootstrap() {
   try {
-    console.log("Initializing local SQLite database...");
+    console.log("Initializing database connection...");
     const db = await getDb();
     console.log("Database initialized successfully!");
 

@@ -21,9 +21,7 @@ import {
   ResponsiveContainer,
   PieChart, 
   Pie, 
-  Cell,
-  AreaChart,
-  Area
+  Cell
 } from 'recharts';
 
 export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
@@ -61,33 +59,32 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
   }, {});
 
   const STATUS_COLORS = {
-    'New': '#6b7280',
-    'Contacting': '#87D6C2',
-    'Contacted': '#3b82f6',
-    'Warm': '#fbbf24',
-    'Replied': '#00BC7D',
-    'Do Not Contact': '#ef4444'
+    'New': '#64748b',            // slate-500
+    'Contacting': '#0d9488',     // teal-600
+    'Contacted': '#2563eb',      // blue-600
+    'Warm': '#d97706',           // amber-600
+    'Replied': '#10b981',        // emerald-500
+    'Do Not Contact': '#dc2626'  // red-600
   };
 
   const statusChartData = Object.entries(statusCounts).map(([name, value]) => ({
     name,
     value,
-    color: STATUS_COLORS[name] || '#6b7280'
+    color: STATUS_COLORS[name] || '#64748b'
   }));
 
   // Activity Feed Generator
   useEffect(() => {
     if (leads.length === 0) return;
     
-    // Sort leads by date or make a mock activity log
     const activities = leads
       .slice(0, 4)
       .map((lead, idx) => {
         const actions = [
-          { text: `Nouveau prospect importé: "${lead.name}"`, time: 'Il y a 10 min', icon: Users, color: '#87D6C2' },
-          { text: `Scraping réussi pour ${lead.name}`, time: 'Il y a 2h', icon: Globe, color: '#00BC7D' },
-          { text: `Lead mis à jour: status "${lead.status}"`, time: 'Il y a 5h', icon: Sparkles, color: '#fbbf24' },
-          { text: `Email envoyé à ${lead.email || lead.name}`, time: 'Hier', icon: Mail, color: '#3b82f6' }
+          { text: `Nouveau prospect importé: "${lead.name}"`, time: 'Il y a 10 min', icon: Users, color: '#0d9488', bg: 'bg-teal-50', textCol: 'text-teal-700' },
+          { text: `Scraping réussi pour ${lead.name}`, time: 'Il y a 2h', icon: Globe, color: '#10b981', bg: 'bg-emerald-50', textCol: 'text-emerald-700' },
+          { text: `Lead mis à jour: status "${lead.status}"`, time: 'Il y a 5h', icon: Sparkles, color: '#d97706', bg: 'bg-amber-50', textCol: 'text-amber-700' },
+          { text: `Email envoyé à ${lead.email || lead.name}`, time: 'Hier', icon: Mail, color: '#2563eb', bg: 'bg-blue-50', textCol: 'text-blue-700' }
         ];
         return {
           id: lead.id + '-' + idx,
@@ -96,8 +93,6 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
       });
     setRecentActivities(activities);
   }, [leads]);
-
-
 
   // Fallback Charts if database is empty
   const defaultCategoryData = [
@@ -109,208 +104,193 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
   ];
 
   const defaultStatusData = [
-    { name: 'New', value: 25, color: '#6b7280' },
-    { name: 'Contacted', value: 18, color: '#3b82f6' },
-    { name: 'Warm', value: 8, color: '#fbbf24' },
-    { name: 'Replied', value: 10, color: '#00BC7D' }
+    { name: 'New', value: 25, color: '#64748b' },
+    { name: 'Contacted', value: 18, color: '#2563eb' },
+    { name: 'Warm', value: 8, color: '#d97706' },
+    { name: 'Replied', value: 10, color: '#10b981' }
   ];
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Title Header */}
-      <div className="flex-between mb-20">
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
-          <h2>Tableau de Bord</h2>
-          <p style={{ color: '#a3a3a3', fontSize: '14px', marginTop: '4px' }}>
+          <h2 className="text-2xl font-heading font-extrabold text-slate-800">Tableau de Bord</h2>
+          <p className="text-slate-500 text-sm mt-1">
             Pilotez votre prospection commerciale Witech Lead.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span className="badge badge-replied" style={{ textTransform: 'none' }}>
-            <span className="pulse-indicator"></span>
+        <div className="flex items-center">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
             Sync local active
           </span>
         </div>
       </div>
 
       {/* Metrics Row */}
-      <div className="dashboard-grid">
-        <div className="glass-panel metric-card" style={{ '--accent': '#87D6C2' }}>
-          <div className="metric-header">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+        {/* Metric 1 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-teal-400 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Total Prospects</span>
-            <Users />
+            <Users className="w-5 h-5 text-teal-500" />
           </div>
-          <div className="metric-value">{totalLeads}</div>
-          <div className="metric-footer">
-            <span>Prospects importés dans la base</span>
-          </div>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{totalLeads}</div>
+          <div className="text-xs text-slate-500">Prospects importés dans la base</div>
         </div>
 
-        <div className="glass-panel metric-card" style={{ '--accent': '#00BC7D' }}>
-          <div className="metric-header">
+        {/* Metric 2 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Couverture Email</span>
-            <Globe />
+            <Globe className="w-5 h-5 text-emerald-500" />
           </div>
-          <div className="metric-value">{emailCoverage}%</div>
-          <div className="metric-footer">
-            <span className="metric-trend-up">{leadsWithEmail} / {totalLeads}</span>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{emailCoverage}%</div>
+          <div className="text-xs text-slate-500 flex items-center gap-1.5">
+            <span className="text-emerald-600 font-bold">{leadsWithEmail} / {totalLeads}</span>
             <span>avec email</span>
           </div>
         </div>
 
-        <div className="glass-panel metric-card" style={{ '--accent': '#3b82f6' }}>
-          <div className="metric-header">
+        {/* Metric 3 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Total Contactés</span>
-            <Mail />
+            <Mail className="w-5 h-5 text-blue-500" />
           </div>
-          <div className="metric-value">{contactedLeads}</div>
-          <div className="metric-footer">
-            <span>Campagnes SMTP ou mailto</span>
-          </div>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{contactedLeads}</div>
+          <div className="text-xs text-slate-500">Campagnes SMTP ou mailto</div>
         </div>
 
-        <div className="glass-panel metric-card" style={{ '--accent': '#00BC7D' }}>
-          <div className="metric-header">
+        {/* Metric 4 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Taux de Réponse</span>
-            <TrendingUp />
+            <TrendingUp className="w-5 h-5 text-emerald-500" />
           </div>
-          <div className="metric-value">{replyRate}%</div>
-          <div className="metric-footer">
-            <span className="metric-trend-up">{repliedLeads}</span>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{replyRate}%</div>
+          <div className="text-xs text-slate-500 flex items-center gap-1.5">
+            <span className="text-emerald-600 font-bold">{repliedLeads}</span>
             <span>retours chaleureux</span>
           </div>
         </div>
 
-        <div className="glass-panel metric-card" style={{ '--accent': '#ef4444' }}>
-          <div className="metric-header">
+        {/* Metric 5 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-red-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Sans Site Web</span>
-            <AlertTriangle />
+            <AlertTriangle className="w-5 h-5 text-red-500" />
           </div>
-          <div className="metric-value">{noWebsiteCount}</div>
-          <div className="metric-footer">
-            <span>Cibles directes Web Design</span>
-          </div>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{noWebsiteCount}</div>
+          <div className="text-xs text-slate-500">Cibles directes Web Design</div>
         </div>
 
-        <div className="glass-panel metric-card" style={{ '--accent': '#a78bfa' }}>
-          <div className="metric-header">
+        {/* Metric 6 */}
+        <div className="bg-white border border-slate-200 border-l-4 border-l-purple-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
             <span>Zéro Automatisation</span>
-            <Sparkles />
+            <Sparkles className="w-5 h-5 text-purple-500" />
           </div>
-          <div className="metric-value">{noAutomationCount}</div>
-          <div className="metric-footer">
-            <span>Cibles automatisation</span>
-          </div>
+          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{noAutomationCount}</div>
+          <div className="text-xs text-slate-500">Cibles automatisation</div>
         </div>
       </div>
 
-      <div className="row">
+      {/* Charts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category distribution Chart */}
-        <div className="col col-6">
-          <div className="glass-panel" style={{ minHeight: '340px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '16px' }}>Répartition par Catégories</h3>
-            <div style={{ width: '100%', height: '240px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={totalLeads > 0 ? categoryChartData : defaultCategoryData}>
-                  <XAxis dataKey="name" stroke="#666" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#666" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ background: '#0e0e0e', borderColor: 'rgba(255,255,255,0.08)', borderRadius: '8px', color: '#fff' }}
-                  />
-                  <Bar dataKey="count" fill="#00BC7D" radius={[6, 6, 0, 0]}>
-                    {(totalLeads > 0 ? categoryChartData : defaultCategoryData).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#00BC7D' : '#87D6C2'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
+          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Répartition par Catégories</h3>
+          <div className="w-full h-64 mt-auto">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={totalLeads > 0 ? categoryChartData : defaultCategoryData}>
+                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                <Tooltip 
+                  contentStyle={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', color: '#1e293b' }}
+                />
+                <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]}>
+                  {(totalLeads > 0 ? categoryChartData : defaultCategoryData).map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#0d9488' : '#87D6C2'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
         {/* Funnel distribution chart */}
-        <div className="col col-6">
-          <div className="glass-panel" style={{ minHeight: '340px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '16px' }}>Tunnel de Prospection</h3>
-            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '20px', minHeight: '240px', padding: '10px 0' }}>
-              <div style={{ width: '160px', height: '160px', flexShrink: 0 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={totalLeads > 0 ? statusChartData : defaultStatusData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={65}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ background: '#0e0e0e', borderColor: 'rgba(255,255,255,0.08)', borderRadius: '8px', color: '#fff' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '120px' }}>
-                {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
-                  <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: entry.color }}></span>
-                    <span style={{ color: '#a3a3a3' }}>{entry.name}: <strong>{entry.value}</strong></span>
-                  </div>
-                ))}
-              </div>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
+          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Tunnel de Prospection</h3>
+          <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-6 mt-auto py-2">
+            <div className="w-40 h-40 flex-shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={totalLeads > 0 ? statusChartData : defaultStatusData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={65}
+                    paddingAngle={4}
+                    dataKey="value"
+                  >
+                    {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', color: '#1e293b' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex flex-col gap-2 min-w-[140px]">
+              {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
+                <div key={index} className="flex items-center gap-2.5 text-xs text-slate-600">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }}></span>
+                  <span>{entry.name}: <strong className="text-slate-800 font-bold">{entry.value}</strong></span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="row mt-20">
-        {/* Recent Activity Logs */}
-        <div className="col col-12">
-          <div className="glass-panel" style={{ height: '100%' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Clock style={{ width: '18px', color: '#87D6C2' }} />
-              Flux d'Activités Récentes
-            </h3>
-            
-            {recentActivities.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#666' }}>
-                <Sparkles style={{ width: '32px', height: '32px', marginBottom: '8px', opacity: 0.5 }} />
-                <p style={{ fontSize: '13px' }}>Aucune activité. Importez vos premiers prospects !</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {recentActivities.map((act) => {
-                  const Icon = act.icon;
-                  return (
-                    <div key={act.id} style={{ display: 'flex', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '12px' }}>
-                      <div style={{ 
-                        width: '36px', 
-                        height: '36px', 
-                        borderRadius: '10px', 
-                        background: `${act.color}15`, 
-                        border: `1px solid ${act.color}30`,
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center' 
-                      }}>
-                        <Icon style={{ width: '16px', height: '16px', color: act.color }} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: '13px', color: '#e5e7eb', fontWeight: 500 }}>{act.text}</p>
-                        <span style={{ fontSize: '11px', color: '#666' }}>{act.time}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+      {/* Recent Activity Log */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+        <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-teal-600" />
+          Flux d'Activités Récentes
+        </h3>
+        
+        {recentActivities.length === 0 ? (
+          <div className="text-center py-12 text-slate-400">
+            <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-40 text-teal-500" />
+            <p className="text-sm">Aucune activité. Importez vos premiers prospects !</p>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {recentActivities.map((act) => {
+              const Icon = act.icon;
+              return (
+                <div key={act.id} className="flex gap-4 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${act.bg} border border-slate-200`}>
+                    <Icon className="w-4 h-4" style={{ color: act.color }} />
+                  </div>
+                  <div className="flex-grow">
+                    <p className="text-sm font-semibold text-slate-800">{act.text}</p>
+                    <span className="text-xs text-slate-400">{act.time}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

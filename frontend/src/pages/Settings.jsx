@@ -10,8 +10,8 @@ import {
   Download, 
   Upload,
   RefreshCw,
-  Sparkles,
-  Info
+  Info,
+  Phone
 } from 'lucide-react';
 
 export default function Settings({ apiHost, leads = [], reloadLeads }) {
@@ -24,13 +24,17 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
     smtp_name: "Wi'Tech Agency",
     company_name: "Wi'Tech Agency",
     company_website: 'https://www.witechagency.com',
-    sender_signature: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com"
+    sender_signature: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com",
+    twilio_account_sid: '',
+    twilio_auth_token: '',
+    twilio_phone_number: '',
+    twilio_whatsapp_number: ''
   });
 
   // Action states
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null); // { success: boolean, error?: string }
+  const [testResult, setTestResult] = useState(null);
   const [importText, setImportText] = useState('');
   
   // Load Settings on mount
@@ -170,141 +174,173 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
   };
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Title Header */}
-      <div className="flex-between mb-20">
-        <div>
-          <h2>Configurations & Outils</h2>
-          <p style={{ color: '#a3a3a3', fontSize: '14px', marginTop: '4px' }}>
-            Paramétrez vos connexions SMTP et gérez les exports de votre base de données.
-          </p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-heading font-extrabold text-slate-800">Configurations & Outils</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          Paramétrez vos connexions SMTP, Twilio et gérez les exports de votre base de données.
+        </p>
       </div>
 
-      <div className="row">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* SMTP Parameters */}
-        <div className="col col-8">
-          <div className="glass-panel" style={{ height: '100%' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Lock style={{ width: '18px', color: '#00BC7D' }} />
-              Serveur de Messagerie Sortante (SMTP)
-            </h3>
-            
-            <form onSubmit={handleSaveSettings}>
-              <div className="row">
-                <div className="col col-8">
-                  <div className="form-group">
-                    <label className="form-label">Hôte SMTP *</label>
+        <div className="lg:col-span-8">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 h-full flex flex-col justify-between">
+            <div>
+              <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-6 flex items-center gap-2">
+                <Lock className="w-5 h-5 text-teal-600" />
+                Serveur de Messagerie Sortante (SMTP)
+              </h3>
+              
+              <form onSubmit={handleSaveSettings} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Hôte SMTP *</label>
                     <input 
-                      type="text" className="form-control" required
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                       value={settings.smtp_host} onChange={(e) => handleInputChange('smtp_host', e.target.value)}
                       placeholder="smtp.gmail.com, mail.gandi.net..."
                     />
                   </div>
-                </div>
-                <div className="col col-4">
-                  <div className="form-group">
-                    <label className="form-label">Port SMTP *</label>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Port SMTP *</label>
                     <input 
-                      type="text" className="form-control" required
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                       value={settings.smtp_port} onChange={(e) => handleInputChange('smtp_port', e.target.value)}
                       placeholder="587, 465..."
                     />
                   </div>
                 </div>
-              </div>
 
-              <div className="row">
-                <div className="col col-6">
-                  <div className="form-group">
-                    <label className="form-label">Utilisateur SMTP *</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Utilisateur SMTP *</label>
                     <input 
-                      type="text" className="form-control" required
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                       value={settings.smtp_user} onChange={(e) => handleInputChange('smtp_user', e.target.value)}
                       placeholder="votre-email@gmail.com"
                     />
                   </div>
-                </div>
-                <div className="col col-6">
-                  <div className="form-group">
-                    <label className="form-label">Mot de passe SMTP *</label>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mot de passe SMTP *</label>
                     <input 
-                      type="password" className="form-control" required
+                      type="password" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                       value={settings.smtp_pass} onChange={(e) => handleInputChange('smtp_pass', e.target.value)}
                       placeholder="••••••••••••••••"
                     />
                   </div>
                 </div>
-              </div>
 
-              <div className="row">
-                <div className="col col-6">
-                  <div className="form-group">
-                    <label className="form-label">Adresse Expéditeur (From)</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Adresse Expéditeur (From)</label>
                     <input 
-                      type="email" className="form-control"
+                      type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
                       value={settings.smtp_from} onChange={(e) => handleInputChange('smtp_from', e.target.value)}
                       placeholder="laisser vide pour utiliser l'utilisateur"
                     />
                   </div>
-                </div>
-                <div className="col col-6">
-                  <div className="form-group">
-                    <label className="form-label">Nom de l'Expéditeur (Name)</label>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de l'Expéditeur (Name)</label>
                     <input 
-                      type="text" className="form-control"
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
                       value={settings.smtp_name} onChange={(e) => handleInputChange('smtp_name', e.target.value)}
                       placeholder="Ex: Wi'Tech Agency"
                     />
                   </div>
                 </div>
-              </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', flexWrap: 'wrap' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary"
-                  onClick={handleTestSmtp}
-                  disabled={testing || !settings.smtp_host || !settings.smtp_user}
-                >
-                  {testing ? (
-                    <>
-                      <RefreshCw style={{ width: '14px', animation: 'spin 1s linear infinite' }} />
-                      Vérification SMTP...
-                    </>
-                  ) : (
-                    'Tester la Connexion'
-                  )}
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  <Save style={{ width: '14px' }} />
-                  {saving ? 'Sauvegarde...' : 'Sauvegarder les Paramètres'}
-                </button>
-              </div>
-            </form>
+                {/* Twilio Outreach Configuration (SMS/WhatsApp) */}
+                <div className="border-t border-slate-100 pt-6 mt-6">
+                  <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center gap-2">
+                    <Phone className="w-5 h-5 text-teal-600" />
+                    Configuration Twilio (SMS & WhatsApp Outreach)
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Twilio Account SID</label>
+                      <input 
+                        type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                        value={settings.twilio_account_sid || ''} onChange={(e) => handleInputChange('twilio_account_sid', e.target.value)}
+                        placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Twilio Auth Token</label>
+                      <input 
+                        type="password" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                        value={settings.twilio_auth_token || ''} onChange={(e) => handleInputChange('twilio_auth_token', e.target.value)}
+                        placeholder="••••••••••••••••••••••••••••••••"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Numéro Expéditeur Twilio (SMS)</label>
+                      <input 
+                        type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                        value={settings.twilio_phone_number || ''} onChange={(e) => handleInputChange('twilio_phone_number', e.target.value)}
+                        placeholder="Ex: +14155552671"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Numéro Expéditeur Twilio (WhatsApp)</label>
+                      <input 
+                        type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                        value={settings.twilio_whatsapp_number || ''} onChange={(e) => handleInputChange('twilio_whatsapp_number', e.target.value)}
+                        placeholder="Ex: +14155238886"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3 pt-6 border-t border-slate-100 mt-6">
+                  <button 
+                    type="button" 
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-sm shadow-sm hover:bg-slate-50 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleTestSmtp}
+                    disabled={testing || !settings.smtp_host || !settings.smtp_user}
+                  >
+                    {testing ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-teal-600" />
+                        Vérification SMTP...
+                      </>
+                    ) : (
+                      'Tester la Connexion'
+                    )}
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={saving}
+                  >
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Sauvegarde...' : 'Sauvegarder les Paramètres'}
+                  </button>
+                </div>
+              </form>
+            </div>
 
             {/* Test Connection Display Panel */}
             {testResult && (
-              <div style={{ 
-                marginTop: '16px', 
-                padding: '12px 16px', 
-                borderRadius: '10px', 
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                background: testResult.success ? 'rgba(0,188,125,0.05)' : 'rgba(239,68,68,0.05)',
-                border: `1px solid ${testResult.success ? '#00BC7D' : '#ef4444'}`
-              }}>
+              <div className={`mt-5 p-4 rounded-xl text-sm flex items-start gap-3 border ${
+                testResult.success 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}>
                 {testResult.success ? (
                   <>
-                    <Check style={{ width: '16px', color: '#00BC7D', flexShrink: 0 }} />
-                    <span style={{ color: '#e5e7eb' }}>Connexion établie avec succès ! Le serveur SMTP de Witech Lead est prêt à l'envoi.</span>
+                    <Check className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>Connexion établie avec succès ! Le serveur SMTP de Witech Lead est prêt à l'envoi.</span>
                   </>
                 ) : (
                   <>
-                    <X style={{ width: '16px', color: '#ef4444', flexShrink: 0 }} />
-                    <span style={{ color: '#e5e7eb' }}>Échec de connexion : <strong>{testResult.error}</strong>.</span>
+                    <X className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <span>Échec de connexion : <strong>{testResult.error}</strong>.</span>
                   </>
                 )}
               </div>
@@ -313,104 +349,107 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
         </div>
 
         {/* Agency profiles & backups */}
-        <div className="col col-4">
-          <div className="glass-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <User style={{ width: '18px', color: '#87D6C2' }} />
-              Profil Wi'Tech Agency
-            </h3>
+        <div className="lg:col-span-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 h-full flex flex-col justify-between">
+            <div className="space-y-4 w-full">
+              <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-2 flex items-center gap-2">
+                <User className="w-5 h-5 text-teal-600" />
+                Profil Wi'Tech Agency
+              </h3>
 
-            <div className="form-group">
-              <label className="form-label">Nom de votre SaaS</label>
-              <input 
-                type="text" className="form-control"
-                value={settings.company_name} onChange={(e) => handleInputChange('company_name', e.target.value)}
-              />
-            </div>
-            
-            <div className="form-group">
-              <label className="form-label">Site Internet de base</label>
-              <input 
-                type="text" className="form-control"
-                value={settings.company_website} onChange={(e) => handleInputChange('company_website', e.target.value)}
-              />
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de votre SaaS</label>
+                <input 
+                  type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={settings.company_name} onChange={(e) => handleInputChange('company_name', e.target.value)}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Site Internet de base</label>
+                <input 
+                  type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={settings.company_website} onChange={(e) => handleInputChange('company_website', e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Signature par défaut</label>
+                <textarea 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[120px] font-mono text-xs"
+                  value={settings.sender_signature} onChange={(e) => handleInputChange('sender_signature', e.target.value)}
+                />
+              </div>
             </div>
 
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Signature par défaut</label>
-              <textarea 
-                className="form-control"
-                value={settings.sender_signature} onChange={(e) => handleInputChange('sender_signature', e.target.value)}
-                style={{ minHeight: '100px', fontSize: '12px' }}
-              />
-            </div>
-
-            <button type="button" className="btn btn-secondary" style={{ width: '100%' }} onClick={handleSaveSettings}>
+            <button 
+              type="button" 
+              className="w-full mt-6 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150"
+              onClick={handleSaveSettings}
+            >
               Sauvegarder le Profil
             </button>
           </div>
         </div>
       </div>
 
-      <div className="row mt-20">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Backup Database panel */}
-        <div className="col col-6">
-          <div className="glass-panel" style={{ height: '100%' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Download style={{ width: '18px', color: '#87D6C2' }} />
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+          <div>
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-3 flex items-center gap-2">
+              <Download className="w-5 h-5 text-teal-600" />
               Sauvegarde de la Base (Export)
             </h3>
-            <p style={{ color: '#a3a3a3', fontSize: '13px', marginBottom: '20px' }}>
+            <p className="text-slate-500 text-sm mb-5">
               Téléchargez l'intégralité de vos prospects qualifiés actuels au format JSON pour les sauvegarder ou les réutiliser sur un autre poste.
             </p>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.02)', padding: '12px 16px', border: '1px solid rgba(255,255,255,0.04)', borderRadius: '10px', marginBottom: '20px' }}>
-              <Info style={{ width: '16px', color: '#87D6C2', flexShrink: 0 }} />
-              <span style={{ fontSize: '12px', color: '#e5e7eb' }}>
+            <div className="flex items-start gap-3 bg-slate-50 border border-slate-200 p-4 rounded-xl mb-6">
+              <Info className="w-5 h-5 text-teal-600 flex-shrink-0 mt-0.5" />
+              <span className="text-xs text-slate-600">
                 Votre base contient actuellement <strong>{leads.length}</strong> prospect(s) prêt(s) à l'exportation.
               </span>
             </div>
-
-            <button 
-              type="button" 
-              className="btn btn-secondary" 
-              style={{ width: '100%' }}
-              onClick={handleExportData}
-            >
-              Exporter la Base (.json)
-            </button>
           </div>
+
+          <button 
+            type="button" 
+            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-sm shadow-sm hover:bg-slate-50 active:scale-95 transition-all duration-150"
+            onClick={handleExportData}
+          >
+            Exporter la Base (.json)
+          </button>
         </div>
 
         {/* Bulk Raw imports (CSV style copy-pastes) */}
-        <div className="col col-6">
-          <div className="glass-panel" style={{ height: '100%' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Upload style={{ width: '18px', color: '#00BC7D' }} />
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+          <div>
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-3 flex items-center gap-2">
+              <Upload className="w-5 h-5 text-teal-600" />
               Import Brut (CSV / JSON)
             </h3>
-            <p style={{ color: '#a3a3a3', fontSize: '13px', marginBottom: '12px' }}>
+            <p className="text-slate-500 text-sm mb-4">
               Copiez-collez des lignes brutes (séparées par des virgules : <strong>Nom, Catégorie, Site, Ville, Téléphone, Email</strong>) ou une chaîne JSON brute exportée.
             </p>
-            <div className="form-group">
+            <div className="mb-4">
               <textarea 
-                className="form-control" 
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-xs focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[100px] font-mono" 
                 placeholder="Dupont Plomberie, Plombier, http://dupont.fr, Paris, 0145228800, contact@dupont.fr&#10;SOS Menuisier, Menuisier, http://sosbois.fr, Lyon"
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
-                style={{ minHeight: '80px', fontSize: '11px', fontFamily: 'monospace' }}
               />
             </div>
-            <button 
-              type="button" 
-              className="btn btn-primary" 
-              style={{ width: '100%' }}
-              onClick={handleBulkTextImport}
-              disabled={!importText.trim()}
-            >
-              Lancer l'Importation de Masse
-            </button>
           </div>
+
+          <button 
+            type="button" 
+            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleBulkTextImport}
+            disabled={!importText.trim()}
+          >
+            Lancer l'Importation de Masse
+          </button>
         </div>
       </div>
     </div>

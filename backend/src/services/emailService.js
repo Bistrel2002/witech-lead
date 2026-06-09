@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import twilio from 'twilio';
 import { getDb } from '../database/db.js';
 
 /**
@@ -11,13 +12,13 @@ function createTransport(smtpConfig) {
   return nodemailer.createTransport({
     host: smtpConfig.smtp_host,
     port: port,
-    secure: isSecure, // true for 465, false for other ports
+    secure: isSecure,
     auth: {
       user: smtpConfig.smtp_user,
       pass: smtpConfig.smtp_pass
     },
     tls: {
-      rejectUnauthorized: false // avoids issues with self-signed certificates
+      rejectUnauthorized: false
     }
   });
 }
@@ -39,7 +40,7 @@ export async function testSmtpConnection(config) {
 }
 
 /**
- * Compiles email body or subject by replacing merge tags
+ * Compiles template by replacing merge tags
  */
 export function compileTemplate(text, data) {
   if (!text) return '';
@@ -62,11 +63,11 @@ export function compileTemplate(text, data) {
   return compiled;
 }
 
-// Map to keep track of active background campaign runs so they can be monitored or managed
+// Map to keep track of active background campaign runs
 const activeCampaignRuns = new Set();
 
 /**
- * Processes a campaign in the background sequentially with delay
+ * Processes a campaign (Email, SMS, or WhatsApp) in the background sequentially with delay
  */
 export async function runCampaignBackground(campaignId) {
   if (activeCampaignRuns.has(campaignId)) return;
@@ -85,20 +86,34 @@ export async function runCampaignBackground(campaignId) {
       throw new Error(`Campaign ID ${campaignId} not found`);
     }
 
-    // 2. Fetch SMTP / Sender Settings
+    const channel = campaign.channel || 'email';
+    console.log(`CampaignService: Starting campaign run for ID ${campaignId} on channel [${channel}]...`);
+
+    // 2. Fetch Settings
     const settingsList = await db.all('SELECT key, value FROM settings');
     const settings = settingsList.reduce((acc, curr) => {
       acc[curr.key] = curr.value;
       return acc;
     }, {});
 
-    // Ensure SMTP configuration is set before attempting to run
-    if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
-      throw new Error('SMTP is not configured in settings. Cannot start campaign.');
+    // Validate channel configurations
+    if (channel === 'email') {
+      if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
+        throw new Error('SMTP is not configured in settings. Cannot run email campaign.');
+      }
+    } else {
+      if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
+        throw new Error('Twilio Account SID or Auth Token is missing in settings. Cannot run message campaign.');
+      }
+      if (channel === 'sms' && !settings.twilio_phone_number) {
+        throw new Error('Twilio SMS Sender Phone Number is missing in settings.');
+      }
+      if (channel === 'whatsapp' && !settings.twilio_whatsapp_number) {
+        throw new Error('Twilio WhatsApp Sender Phone Number is missing in settings.');
+      }
     }
 
     // 3. Fetch prospects queued for this campaign
-    // (Those that match the campaign criteria or are in logs as 'Pending')
     const prospects = await db.all(`
       SELECT l.*, cl.id as log_id 
       FROM campaign_logs cl 
@@ -107,11 +122,7 @@ export async function runCampaignBackground(campaignId) {
     `, campaignId);
 
     if (prospects.length === 0) {
-      // Nothing to process, set campaign status to Completed
-      await db.run(
-        'UPDATE campaigns SET status = "Completed" WHERE id = ?',
-        campaignId
-      );
+      await db.run('UPDATE campaigns SET status = "Completed" WHERE id = ?', campaignId);
       activeCampaignRuns.delete(campaignId);
       return;
     }
@@ -123,7 +134,16 @@ export async function runCampaignBackground(campaignId) {
       campaignId
     );
 
-    const transporter = createTransport(settings);
+    // Initialize clients
+    let transporter = null;
+    let twilioClient = null;
+
+    if (channel === 'email') {
+      transporter = createTransport(settings);
+    } else {
+      twilioClient = twilio(settings.twilio_account_sid, settings.twilio_auth_token);
+    }
+
     const fromAddress = settings.smtp_from || settings.smtp_user;
     const fromName = settings.smtp_name || "Wi'Tech Agency";
 
@@ -131,29 +151,34 @@ export async function runCampaignBackground(campaignId) {
     let failedCount = 0;
 
     for (const prospect of prospects) {
-      // Check if campaign was canceled or paused in the DB
+      // Check if campaign was canceled or paused
       const currentCampaignState = await db.get('SELECT status FROM campaigns WHERE id = ?', campaignId);
       if (currentCampaignState.status !== 'Active') {
         break; // Stop running
       }
 
-      if (!prospect.email) {
-        // Skip prospects without email and mark failed
+      // Channel-specific lead field validation
+      if (channel === 'email' && !prospect.email) {
         await db.run(
           "UPDATE campaign_logs SET status = 'Failed', error_message = 'No email address available' WHERE id = ?",
           prospect.log_id
         );
         failedCount++;
+        await db.run('UPDATE campaigns SET failed_count = ? WHERE id = ?', failedCount, campaignId);
+        continue;
+      }
+
+      if ((channel === 'sms' || channel === 'whatsapp') && !prospect.phone) {
         await db.run(
-          'UPDATE campaigns SET failed_count = ? WHERE id = ?',
-          failedCount,
-          campaignId
+          "UPDATE campaign_logs SET status = 'Failed', error_message = 'No phone number available' WHERE id = ?",
+          prospect.log_id
         );
+        failedCount++;
+        await db.run('UPDATE campaigns SET failed_count = ? WHERE id = ?', failedCount, campaignId);
         continue;
       }
 
       try {
-        // Compile email content
         const templateData = {
           company_name: prospect.name,
           website: prospect.website,
@@ -166,13 +191,32 @@ export async function runCampaignBackground(campaignId) {
         const subject = compileTemplate(campaign.subject, templateData);
         const body = compileTemplate(campaign.body, templateData);
 
-        // Send Email
-        await transporter.sendMail({
-          from: `"${fromName}" <${fromAddress}>`,
-          to: prospect.email,
-          subject: subject,
-          text: body
-        });
+        if (channel === 'email') {
+          // Send Email
+          await transporter.sendMail({
+            from: `"${fromName}" <${fromAddress}>`,
+            to: prospect.email,
+            subject: subject,
+            text: body
+          });
+        } else if (channel === 'sms') {
+          // Send SMS
+          await twilioClient.messages.create({
+            body: body,
+            from: settings.twilio_phone_number,
+            to: prospect.phone
+          });
+        } else if (channel === 'whatsapp') {
+          // Send WhatsApp (prepend whatsapp: prefix as required by Twilio)
+          const cleanPhone = prospect.phone.replace(/\s+/g, '');
+          const formattedTo = cleanPhone.startsWith('+') ? cleanPhone : `+33${cleanPhone.slice(1)}`;
+          
+          await twilioClient.messages.create({
+            body: body,
+            from: `whatsapp:${settings.twilio_whatsapp_number.trim()}`,
+            to: `whatsapp:${formattedTo}`
+          });
+        }
 
         // Log Success
         await db.run(
@@ -181,15 +225,11 @@ export async function runCampaignBackground(campaignId) {
         );
 
         // Update Lead Status
-        await db.run(
-          "UPDATE leads SET status = 'Contacted' WHERE id = ?",
-          prospect.lead_id
-        );
-
+        await db.run("UPDATE leads SET status = 'Contacted' WHERE id = ?", prospect.lead_id);
         sentCount++;
         
       } catch (err) {
-        // Log Failure
+        console.error(`CampaignService: Error sending to lead ${prospect.name}:`, err.message);
         await db.run(
           "UPDATE campaign_logs SET status = 'Failed', error_message = ?, sent_at = CURRENT_TIMESTAMP WHERE id = ?",
           err.message,
@@ -206,25 +246,19 @@ export async function runCampaignBackground(campaignId) {
         campaignId
       );
 
-      // Delay between emails (e.g., 5 seconds) to avoid spam filters
+      // Delay between messages (5 seconds stagger queue)
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
 
     // Complete campaign run
     const finalCampaignState = await db.get('SELECT status FROM campaigns WHERE id = ?', campaignId);
     if (finalCampaignState.status === 'Active') {
-      await db.run(
-        'UPDATE campaigns SET status = "Completed" WHERE id = ?',
-        campaignId
-      );
+      await db.run('UPDATE campaigns SET status = "Completed" WHERE id = ?', campaignId);
     }
 
   } catch (error) {
-    // Log fatal campaign error
-    await db.run(
-      'UPDATE campaigns SET status = "Failed" WHERE id = ?',
-      campaignId
-    );
+    console.error(`CampaignService: Fatal error in campaign ID ${campaignId}:`, error.message);
+    await db.run('UPDATE campaigns SET status = "Failed" WHERE id = ?', campaignId);
   } finally {
     activeCampaignRuns.delete(campaignId);
   }

@@ -23,7 +23,6 @@ import {
   ShieldOff,
   Smartphone,
   MessageSquare,
-  Code2,
   Clock,
   X,
   Upload,
@@ -31,10 +30,10 @@ import {
   LayoutList,
   Building2,
   Calendar,
-  MessageCircle
+  MessageCircle,
+  Play
 } from 'lucide-react';
 
-// Pipeline statuses matching the PRD (§4.2)
 const PIPELINE_STATUSES = [
   'New',
   'Contacted',
@@ -44,7 +43,6 @@ const PIPELINE_STATUSES = [
   'Closed Lost'
 ];
 
-// Mock discussions for demo fallback mode when API is offline/empty
 const getMockDiscussions = (leadId) => {
   const now = new Date();
   const formatTime = (daysAgo) => new Date(now.getTime() - daysAgo * 24 * 3600 * 1000).toISOString();
@@ -73,7 +71,6 @@ const getMockDiscussions = (leadId) => {
   return [];
 };
 
-// Database fields metadata for smart mapping & classification
 const DATABASE_FIELDS = [
   { key: 'name', label: "Nom de l'entreprise *", required: true, keywords: ['name', 'nom', 'entreprise', 'société', 'company', 'business', 'établissement', 'title'] },
   { key: 'category', label: "Catégorie / Secteur", required: false, keywords: ['category', 'catégorie', 'secteur', 'activité', 'type', 'tags', 'sector', 'job', 'industry'] },
@@ -88,7 +85,6 @@ const DATABASE_FIELDS = [
   { key: 'notes', label: "Notes / Commentaires", required: false, keywords: ['notes', 'commentaires', 'description', 'memo', 'remarques'] }
 ];
 
-// Robust zero-dependency CSV parser that supports standard commas, French semicolons, and escaped quotes/newlines.
 const parseCSV = (text) => {
   const firstLine = text.split('\n')[0] || '';
   const commaCount = (firstLine.match(/,/g) || []).length;
@@ -137,7 +133,6 @@ const parseCSV = (text) => {
   return { headers, rows: dataRows };
 };
 
-// Dynamic SheetJS Excel parser loader via CDN — ensures no dependency footprint unless needed.
 const loadSheetJS = () => {
   return new Promise((resolve, reject) => {
     if (window.XLSX) {
@@ -154,8 +149,6 @@ const loadSheetJS = () => {
 
 export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Strict Category Tabs System
   const [activeCategoryTab, setActiveCategoryTab] = useState('All');
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('All');
@@ -164,13 +157,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   
   // Selection state
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
-  
-  // CRM view states
-  const [viewMode, setViewMode] = useState('board'); // Default to Board View
+  const [viewMode, setViewMode] = useState('board'); // board, list
   const [draggedLeadId, setDraggedLeadId] = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   
-  // Modal states
+  // Modal & Drawer
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeLeadDetails, setActiveLeadDetails] = useState(null);
   
@@ -179,16 +170,26 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [actionInProgress, setActionInProgress] = useState(false);
   const [mapsScraping, setMapsScraping] = useState(false);
   const [scrapingSeconds, setScrapingSeconds] = useState(0);
-  
-  // Google Maps Link Input
+
+  // New Scraper Options (PRD and user requirements)
+  const [scrapeSource, setScrapeSource] = useState('maps'); // maps, database
+  const [searchCategory, setSearchCategory] = useState('');
+  const [searchCity, setSearchCity] = useState('');
+  const [searchRadius, setSearchRadius] = useState(5); // default 5km
+  const [saveToDb, setSaveToDb] = useState(true);
+  const [targetCampaignId, setTargetCampaignId] = useState('');
+  const [campaigns, setCampaigns] = useState([]);
+
+  // Backward compatibility maps link input
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
-  
+  const [useRawLink, setUseRawLink] = useState(false);
+
   // Form states for manual lead
   const [newLead, setNewLead] = useState({
     name: '', category: 'Plombier', website: '', phone: '', email: '', city: '', address: '', notes: ''
   });
 
-  // States for lead discussions/timeline
+  // Timeline discussions
   const [discussions, setDiscussions] = useState([]);
   const [loadingDiscussions, setLoadingDiscussions] = useState(false);
   const [discussionType, setDiscussionType] = useState('Note');
@@ -197,7 +198,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
   // File Import Wizard States
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importStep, setImportStep] = useState(1); // 1: Upload, 2: Mapping, 3: Importing, 4: Success
+  const [importStep, setImportStep] = useState(1);
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [parsedHeaders, setParsedHeaders] = useState([]);
   const [parsedRows, setParsedRows] = useState([]);
@@ -210,17 +211,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [isDragging, setIsDragging] = useState(false);
   const [importError, setImportError] = useState('');
 
-  // Column auto-matching based on keywords
+  // Fetch campaigns for queuing select options
+  useEffect(() => {
+    fetchCampaigns();
+  }, []);
+
+  const fetchCampaigns = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/campaigns`);
+      if (res.ok) setCampaigns(await res.json());
+    } catch (err) {}
+  };
+
   const autoMatchColumn = (field, fileHeaders) => {
     const normalizedField = field.key.toLowerCase();
-    
-    // Try exact match first
     for (const h of fileHeaders) {
       const normalizedH = h.toLowerCase().trim();
       if (normalizedH === normalizedField) return h;
     }
-    
-    // Try keyword matches
     for (const keyword of field.keywords) {
       for (const h of fileHeaders) {
         const normalizedH = h.toLowerCase().trim();
@@ -229,21 +237,17 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         }
       }
     }
-    
-    return ''; // Default: no mapping found
+    return '';
   };
 
-  // Extract unique categories (strictly grouped, no mixing!)
   const uniqueCategories = useMemo(() => [...new Set(leads.map(l => l.category))], [leads]);
 
-  // Filter unique categories by sector search term
   const filteredUniqueCategories = useMemo(() => {
     return uniqueCategories.filter(cat => 
       cat.toLowerCase().includes(categorySearchTerm.toLowerCase())
     );
   }, [uniqueCategories, categorySearchTerm]);
 
-  // Vulnerability metrics (computed once)
   const vulnMetrics = useMemo(() => {
     const noWebsite = leads.filter(l => !l.website || l.website.trim() === '').length;
     const noSSL = leads.filter(l => l.website && l.has_ssl === 0).length;
@@ -252,13 +256,10 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     return { noWebsite, noSSL, noMobile, noAutomation };
   }, [leads]);
 
-  // Filtering Logic
   const filteredLeads = useMemo(() => leads.filter(lead => {
     const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           lead.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           lead.address?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    // Strict category filtering
     const matchesCategory = activeCategoryTab === 'All' || lead.category === activeCategoryTab;
     const matchesStatus = selectedStatus === 'All' || lead.status === selectedStatus;
     
@@ -279,7 +280,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     return matchesSearch && matchesCategory && matchesStatus && matchesEmail && matchesWebsite;
   }), [leads, searchTerm, activeCategoryTab, selectedStatus, emailFilter, websiteFilter]);
 
-  // Handle multi-select toggles
   const handleSelectAll = (e) => {
     if (e.target.checked) {
       setSelectedLeadIds(filteredLeads.map(l => l.id));
@@ -296,7 +296,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   };
 
-  // Timer effect for Google Maps scraping
   useEffect(() => {
     let interval;
     if (mapsScraping) {
@@ -312,53 +311,97 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
   const getScrapingProgressMessage = () => {
     if (scrapingSeconds < 6) {
-      return `Initialisation du navigateur headless Puppeteer... (Étape 1/5)`;
+      return `Lancement du moteur de scraping Playwright (Python)... (Étape 1/5)`;
     } else if (scrapingSeconds < 16) {
-      return `Ouverture de Google Maps et acceptation automatique des cookies... (Étape 2/5)`;
+      return `Génération de l'URL Google Maps optimisée et contournement anti-bot... (Étape 2/5)`;
     } else if (scrapingSeconds < 45) {
-      return `Défilement dynamique de la carte et extraction des établissements visibles... (Étape 3/5)`;
+      return `Extraction des fiches sur un rayon restreint à ${searchRadius}km... (Étape 3/5)`;
     } else if (scrapingSeconds < 68) {
-      return `Analyse et filtrage strict : isolation des établissements avec site web... (Étape 4/5)`;
+      return `Audit digital du site web: vérification SSL, mobile, e-mails et widgets... (Étape 4/5)`;
     } else {
-      return `Enregistrement des prospects qualifiés et calcul des audits digitaux... (Étape 5/5)`;
+      return `Enregistrement des prospects qualifiés dans le CRM / la campagne... (Étape 5/5)`;
     }
   };
 
-  // Google Maps Link Scraper Endpoint Call
-  const handleMapsLinkScrape = async (e) => {
+  // Modernized search scraper launcher
+  const handleLaunchProspecting = async (e) => {
     e.preventDefault();
-    if (!googleMapsUrl.trim()) return;
+    
+    // Validations
+    if (scrapeSource === 'maps' && !useRawLink && (!searchCategory.trim() || !searchCity.trim())) {
+      alert("Veuillez saisir une catégorie et une ville.");
+      return;
+    }
+    if (useRawLink && !googleMapsUrl.trim()) {
+      alert("Veuillez saisir un lien Google Maps.");
+      return;
+    }
+    if (!saveToDb && !targetCampaignId) {
+      alert("Veuillez sélectionner une campagne cible pour ajouter les prospects.");
+      return;
+    }
 
     setMapsScraping(true);
+
     try {
-      const response = await fetch(`${apiHost}/api/leads/scrape-maps-link`, {
+      let endpoint = `${apiHost}/api/leads/scrape-maps-link`;
+      let payload = {};
+
+      if (useRawLink) {
+        payload = { mapsUrl: googleMapsUrl };
+      } else {
+        // Build optimized Google Maps search query from details
+        const query = `${searchCity} ${searchCategory}`;
+        const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}/`;
+        payload = { 
+          mapsUrl,
+          category: searchCategory,
+          city: searchCity,
+          radius: searchRadius,
+          saveToDb,
+          campaignId: targetCampaignId || null
+        };
+      }
+
+      // If calling from French Database (National database lookups)
+      if (scrapeSource === 'database') {
+        endpoint = `${apiHost}/api/leads/french-db-lookup`;
+        payload = {
+          category: searchCategory,
+          city: searchCity,
+          saveToDb,
+          campaignId: targetCampaignId || null
+        };
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mapsUrl: googleMapsUrl })
+        body: JSON.stringify(payload)
       });
       const data = await response.json();
 
       if (response.ok) {
         await reloadLeads();
+        setSearchCategory('');
+        setSearchCity('');
         setGoogleMapsUrl('');
         
         if (data.category) {
           setActiveCategoryTab(data.category);
         }
-
-        alert(`🎉 ${data.message}\n(Seuls les établissements disposant d'un site web ont été importés !)`);
+        alert(`🎉 ${data.message}`);
       } else {
-        alert(data.error || 'Erreur lors du scraping de la recherche Google Maps');
+        alert(data.error || "Une erreur est survenue lors de l'extraction.");
       }
     } catch (err) {
       console.error(err);
-      alert('Impossible d\'exécuter le scraping Maps. Le serveur backend n\'est pas joignable.');
+      alert("Erreur réseau: Impossible de contacter le serveur backend.");
     } finally {
       setMapsScraping(false);
     }
   };
 
-  // Trigger Local Website Scraper
   const handleScrapeContactInfo = async (leadId) => {
     setScrapingLeadId(leadId);
     try {
@@ -388,7 +431,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   };
 
-  // Add Manual Lead
   const handleAddLeadSubmit = async (e) => {
     e.preventDefault();
     setActionInProgress(true);
@@ -415,13 +457,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   };
 
-  // File Import Logic: Step 1: Parse File (JSON, CSV, or Excel)
   const handleFileSelection = async (file) => {
     if (!file) return;
     setUploadedFileName(file.name);
     setImportError('');
     const extension = file.name.split('.').pop().toLowerCase();
-
     const reader = new FileReader();
 
     if (extension === 'json') {
@@ -429,20 +469,15 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         try {
           const json = JSON.parse(e.target.result);
           const rawRows = Array.isArray(json) ? json : [json];
-          if (rawRows.length === 0) {
-            throw new Error("Le fichier JSON est vide.");
-          }
-          // Extract headers from keys of all items
+          if (rawRows.length === 0) throw new Error("Le fichier JSON est vide.");
           const headersSet = new Set();
           rawRows.forEach(item => {
             Object.keys(item).forEach(k => headersSet.add(k));
           });
           const headers = Array.from(headersSet);
-          
           setParsedHeaders(headers);
           setParsedRows(rawRows);
           
-          // Pre-match mappings
           const initialMappings = {};
           DATABASE_FIELDS.forEach(field => {
             initialMappings[field.key] = autoMatchColumn(field, headers);
@@ -458,13 +493,9 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       reader.onload = (e) => {
         try {
           const { headers, rows } = parseCSV(e.target.result);
-          if (rows.length === 0) {
-            throw new Error("Le fichier CSV est vide ou n'a pu être parsé.");
-          }
+          if (rows.length === 0) throw new Error("Le fichier CSV est vide.");
           setParsedHeaders(headers);
           setParsedRows(rows);
-          
-          // Pre-match mappings
           const initialMappings = {};
           DATABASE_FIELDS.forEach(field => {
             initialMappings[field.key] = autoMatchColumn(field, headers);
@@ -477,7 +508,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       };
       reader.readAsText(file);
     } else if (extension === 'xlsx' || extension === 'xls') {
-      // Dynamic excel loading
       try {
         setImportError("Chargement du module Excel (SheetJS)...");
         const XLSX = await loadSheetJS();
@@ -487,28 +517,19 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           try {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
-            if (workbook.SheetNames.length === 0) {
-              throw new Error("Le fichier Excel ne contient pas de feuilles.");
-            }
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
+            if (workbook.SheetNames.length === 0) throw new Error("Aucune feuille dans le fichier.");
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const rawRows = XLSX.utils.sheet_to_json(worksheet);
+            if (rawRows.length === 0) throw new Error("Le fichier est vide.");
             
-            if (rawRows.length === 0) {
-              throw new Error("La feuille Excel sélectionnée est vide.");
-            }
-            
-            // Extract headers
             const headersSet = new Set();
             rawRows.forEach(item => {
               Object.keys(item).forEach(k => headersSet.add(k));
             });
             const headers = Array.from(headersSet);
-            
             setParsedHeaders(headers);
             setParsedRows(rawRows);
             
-            // Pre-match mappings
             const initialMappings = {};
             DATABASE_FIELDS.forEach(field => {
               initialMappings[field.key] = autoMatchColumn(field, headers);
@@ -516,76 +537,58 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             setColumnMappings(initialMappings);
             setImportStep(2);
           } catch (err) {
-            setImportError("Erreur lors de la lecture du fichier Excel: " + err.message);
+            setImportError("Erreur lors du parsing Excel: " + err.message);
           }
         };
         reader.readAsArrayBuffer(file);
       } catch (err) {
-        setImportError("Impossible de charger le parser Excel depuis le CDN. Vérifiez votre connexion internet.");
+        setImportError("Impossible de charger le parser Excel.");
       }
     } else {
-      setImportError("Format de fichier non pris en charge. Veuillez fournir un fichier .json, .csv, ou .xlsx/.xls.");
+      setImportError("Format de fichier non pris en charge.");
     }
   };
 
-  // Launch Lead Import in accurate progress chunks
   const handleLaunchImport = async () => {
-    // Check if Name is mapped
     if (!columnMappings.name) {
-      alert("Le champ 'Nom de l'entreprise' est obligatoire pour l'importation.");
+      alert("Le champ 'Nom de l'entreprise' est obligatoire.");
       return;
     }
-
     setImportStep(3);
     setImportProgress(0);
 
-    // Build lead objects based on mappings
     const structuredLeads = parsedRows.map(row => {
       const lead = {};
-      
       DATABASE_FIELDS.forEach(field => {
         const fileCol = columnMappings[field.key];
         let val = fileCol ? row[fileCol] : undefined;
         
-        // Normalize digital audit flags (SSL, mobile, chat)
         if (['has_ssl', 'is_mobile_friendly', 'has_chat_widget'].includes(field.key)) {
           if (val !== undefined) {
             const strVal = String(val).toLowerCase().trim();
-            if (strVal === 'oui' || strVal === 'yes' || strVal === 'true' || strVal === '1' || val === 1 || val === true) {
-              lead[field.key] = 1;
-            } else {
-              lead[field.key] = 0;
-            }
+            lead[field.key] = (strVal === 'oui' || strVal === 'yes' || strVal === 'true' || strVal === '1' || val === 1 || val === true) ? 1 : 0;
           }
         } else if (field.key === 'rating') {
-          if (val !== undefined && val !== null && val !== '') {
-            lead[field.key] = parseFloat(val) || null;
-          }
+          if (val !== undefined && val !== null && val !== '') lead[field.key] = parseFloat(val) || null;
         } else if (field.key === 'review_count') {
-          if (val !== undefined && val !== null && val !== '') {
-            lead[field.key] = parseInt(val) || 0;
-          }
+          if (val !== undefined && val !== null && val !== '') lead[field.key] = parseInt(val) || 0;
         } else {
           lead[field.key] = val;
         }
       });
-
-      // Classification & Default settings
       lead.name = lead.name ? String(lead.name).trim() : '';
       lead.category = lead.category || defaultCategory || 'Importé';
       lead.city = lead.city || defaultCity || null;
       lead.status = lead.status || defaultStatus || 'New';
-      
       return lead;
-    }).filter(lead => lead.name.length > 0); // Exclude rows with empty names
+    }).filter(lead => lead.name.length > 0);
 
     if (structuredLeads.length === 0) {
-      alert("Aucune donnée valide à importer.");
+      alert("Aucun prospect valide.");
       setImportStep(2);
       return;
     }
 
-    // Split into chunks of 30 to show a premium progress indicator
     const chunkSize = 30;
     let totalInserted = 0;
     let totalSkipped = 0;
@@ -593,48 +596,30 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     try {
       for (let i = 0; i < structuredLeads.length; i += chunkSize) {
         const chunk = structuredLeads.slice(i, i + chunkSize);
-        
         const response = await fetch(`${apiHost}/api/leads/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ customLeads: chunk })
         });
-
         if (response.ok) {
           const resData = await response.json();
           totalInserted += resData.insertedCount || 0;
           totalSkipped += resData.skippedCount || 0;
-        } else {
-          const errorMsg = await response.text();
-          console.error("Batch failure:", errorMsg);
         }
-
-        const pct = Math.round(((i + chunk.length) / structuredLeads.length) * 100);
-        setImportProgress(pct);
-        
-        // Small delay for UI smoothness
-        await new Promise(r => setTimeout(r, 150));
+        setImportProgress(Math.round(((i + chunk.length) / structuredLeads.length) * 100));
+        await new Promise(r => setTimeout(r, 100));
       }
-
-      setImportResult({
-        inserted: totalInserted,
-        skipped: totalSkipped,
-        total: structuredLeads.length
-      });
-
+      setImportResult({ inserted: totalInserted, skipped: totalSkipped, total: structuredLeads.length });
       await reloadLeads();
       setImportStep(4);
     } catch (err) {
       console.error(err);
-      alert("Une erreur est survenue lors de l'importation réseau.");
       setImportStep(2);
     }
   };
 
-  // Delete Leads
   const handleDeleteLeads = async (ids) => {
     if (!window.confirm(`Confirmez-vous la suppression de ${ids.length} prospect(s) ?`)) return;
-    
     setActionInProgress(true);
     try {
       for (const id of ids) {
@@ -652,54 +637,41 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   };
 
-  // Clean duplicates manually via API
   const handleCleanDuplicates = async () => {
-    if (!window.confirm("Voulez-vous lancer l'élimination des doublons dans la base de données ?")) return;
-    
+    if (!window.confirm("Éliminer les doublons ?")) return;
     setActionInProgress(true);
     try {
-      const response = await fetch(`${apiHost}/api/leads/cleanup`, {
-        method: 'POST'
-      });
+      const response = await fetch(`${apiHost}/api/leads/cleanup`, { method: 'POST' });
       if (response.ok) {
         const data = await response.json();
         await reloadLeads();
-        alert(`✨ Nettoyage terminé !\n${data.message}`);
-      } else {
-        alert("Erreur lors de la suppression des doublons.");
+        alert(`✨ ${data.message}`);
       }
     } catch (err) {
       console.error(err);
-      alert("Impossible de contacter le serveur backend.");
     } finally {
       setActionInProgress(false);
     }
   };
 
-  // Update Lead Status
   const handleUpdateStatus = async (leadId, newStatus) => {
     try {
       const targetLead = leads.find(l => l.id === leadId);
       const updatedData = { ...targetLead, status: newStatus };
-      
       const response = await fetch(`${apiHost}/api/leads/${leadId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedData)
       });
-      
       if (response.ok) {
         await reloadLeads();
         if (activeLeadDetails && activeLeadDetails.id === leadId) {
           setActiveLeadDetails({ ...activeLeadDetails, status: newStatus });
         }
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) {}
   };
 
-  // HTML5 Kanban Drag & Drop Handlers
   const handleDragStart = (e, leadId) => {
     setDraggedLeadId(leadId);
     e.dataTransfer.setData('text/plain', leadId);
@@ -711,17 +683,12 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     setDragOverStatus(null);
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-  };
-
   const handleDrop = async (e, targetStatus) => {
     e.preventDefault();
     setDragOverStatus(null);
     const leadIdStr = e.dataTransfer.getData('text/plain') || draggedLeadId;
     if (!leadIdStr) return;
     const leadId = parseInt(leadIdStr);
-    
     const lead = leads.find(l => l.id === leadId);
     if (lead && lead.status !== targetStatus) {
       await handleUpdateStatus(leadId, targetStatus);
@@ -729,7 +696,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     setDraggedLeadId(null);
   };
 
-  // Save Lead Notes
   const handleSaveNotes = async (leadId, newNotes) => {
     try {
       const targetLead = leads.find(l => l.id === leadId);
@@ -740,31 +706,25 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         body: JSON.stringify(updatedData)
       });
       await reloadLeads();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) {}
   };
 
-  // Fetch discussions for an active lead
   const fetchDiscussions = async (leadId) => {
     setLoadingDiscussions(true);
     try {
       const response = await fetch(`${apiHost}/api/leads/${leadId}/discussions`);
       if (response.ok) {
-        const data = await response.json();
-        setDiscussions(data);
+        setDiscussions(await response.json());
       } else {
         setDiscussions(getMockDiscussions(leadId));
       }
     } catch (err) {
-      console.warn("Could not fetch discussions from backend, loading mock fallbacks:", err);
       setDiscussions(getMockDiscussions(leadId));
     } finally {
       setLoadingDiscussions(false);
     }
   };
 
-  // Fetch discussions when active lead changes
   useEffect(() => {
     if (activeLeadDetails && activeLeadDetails.id) {
       fetchDiscussions(activeLeadDetails.id);
@@ -773,17 +733,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   }, [activeLeadDetails]);
 
-  // Add a discussion record
   const handleAddDiscussion = async (e) => {
     e.preventDefault();
     if (!discussionContent.trim() || !activeLeadDetails) return;
 
     setAddingDiscussion(true);
     const leadId = activeLeadDetails.id;
-    const newEntry = {
-      type: discussionType,
-      content: discussionContent.trim()
-    };
+    const newEntry = { type: discussionType, content: discussionContent.trim() };
 
     try {
       const response = await fetch(`${apiHost}/api/leads/${leadId}/discussions`, {
@@ -791,32 +747,16 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newEntry)
       });
-
       if (response.ok) {
         setDiscussionContent('');
         await fetchDiscussions(leadId);
       } else {
-        // Fallback: update state locally if API is offline
-        const mockNew = {
-          id: `local_${Date.now()}`,
-          lead_id: leadId,
-          type: discussionType,
-          content: discussionContent.trim(),
-          created_at: new Date().toISOString()
-        };
+        const mockNew = { id: `local_${Date.now()}`, lead_id: leadId, type: discussionType, content: discussionContent.trim(), created_at: new Date().toISOString() };
         setDiscussions([mockNew, ...discussions]);
         setDiscussionContent('');
       }
     } catch (err) {
-      console.error(err);
-      // Fallback local update
-      const mockNew = {
-        id: `local_${Date.now()}`,
-        lead_id: leadId,
-        type: discussionType,
-        content: discussionContent.trim(),
-        created_at: new Date().toISOString()
-      };
+      const mockNew = { id: `local_${Date.now()}`, lead_id: leadId, type: discussionType, content: discussionContent.trim(), created_at: new Date().toISOString() };
       setDiscussions([mockNew, ...discussions]);
       setDiscussionContent('');
     } finally {
@@ -824,35 +764,20 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
   };
 
-  // Delete a discussion record
   const handleDeleteDiscussion = async (id) => {
-    if (!window.confirm("Voulez-vous vraiment supprimer cet échange ?")) return;
-
+    if (!window.confirm("Supprimer cet échange ?")) return;
     try {
-      // Check if it's a local fallback ID
       if (String(id).startsWith('local_') || String(id).startsWith('m')) {
         setDiscussions(discussions.filter(d => d.id !== id));
         return;
       }
-
-      const response = await fetch(`${apiHost}/api/leads/discussions/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        if (activeLeadDetails) {
-          await fetchDiscussions(activeLeadDetails.id);
-        }
-      } else {
-        setDiscussions(discussions.filter(d => d.id !== id));
-      }
+      const response = await fetch(`${apiHost}/api/leads/discussions/${id}`, { method: 'DELETE' });
+      if (response.ok && activeLeadDetails) await fetchDiscussions(activeLeadDetails.id);
     } catch (err) {
-      console.error(err);
       setDiscussions(discussions.filter(d => d.id !== id));
     }
   };
 
-  // CSV Export
   const handleExportCSV = () => {
     const headers = ['Nom', 'Catégorie', 'Ville', 'Adresse', 'Site Web', 'Email', 'Téléphone', 'Note Maps', 'Avis', 'Statut', 'SSL', 'Mobile', 'Automatisation'];
     const rows = filteredLeads.map(l => [
@@ -870,12 +795,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       l.is_mobile_friendly ? 'Oui' : 'Non',
       l.has_chat_widget ? 'Oui' : 'Non'
     ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
-
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -887,18 +807,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
-      case 'New': return 'badge-new';
-      case 'Contacted': return 'badge-contacted';
-      case 'Meeting Scheduled': return 'badge-meeting';
-      case 'Proposal Sent': return 'badge-proposal';
-      case 'Closed Won': return 'badge-won';
-      case 'Closed Lost': return 'badge-lost';
-      // Legacy statuses fallback
-      case 'Contacting': return 'badge-contacting';
-      case 'Warm': return 'badge-warm';
-      case 'Replied': return 'badge-replied';
-      case 'Do Not Contact': return 'badge-dnc';
-      default: return 'badge-new';
+      case 'New': return 'bg-slate-100 border-slate-200 text-slate-600';
+      case 'Contacted': return 'bg-blue-50 border-blue-200 text-blue-700';
+      case 'Meeting Scheduled': return 'bg-indigo-50 border-indigo-200 text-indigo-700';
+      case 'Proposal Sent': return 'bg-purple-50 border-purple-200 text-purple-700';
+      case 'Closed Won': return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+      case 'Closed Lost': return 'bg-red-50 border-red-200 text-red-700';
+      default: return 'bg-slate-100 border-slate-200 text-slate-600';
     }
   };
 
@@ -914,293 +829,298 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     return labels[status] || status;
   };
 
-  // Get vulnerability flags for a lead
   const getVulnFlags = (lead) => {
     const flags = [];
     if (!lead.website || lead.website.trim() === '') {
-      flags.push({ label: 'Pas de Site', cls: 'vuln-flag-critical', icon: Globe });
+      flags.push({ label: 'Pas de Site', cls: 'bg-red-50 text-red-700 border-red-200', icon: Globe });
     } else {
       if (lead.has_ssl === 0) {
-        flags.push({ label: 'Pas de SSL', cls: 'vuln-flag-warning', icon: ShieldOff });
+        flags.push({ label: 'Pas de SSL', cls: 'bg-amber-50 text-amber-700 border-amber-200', icon: ShieldOff });
       }
       if (lead.is_mobile_friendly === 0) {
-        flags.push({ label: 'Non Mobile', cls: 'vuln-flag-info', icon: Smartphone });
+        flags.push({ label: 'Non Mobile', cls: 'bg-blue-50 text-blue-700 border-blue-200', icon: Smartphone });
       }
       if (lead.has_chat_widget === 0) {
-        flags.push({ label: '0 Auto.', cls: 'vuln-flag-info', icon: MessageSquare });
+        flags.push({ label: '0 Auto.', cls: 'bg-purple-50 text-purple-700 border-purple-200', icon: MessageSquare });
       }
     }
     return flags;
   };
 
-  // Digital audit health dots
   const getAuditDots = (lead) => {
     if (!lead.website || lead.website.trim() === '') {
       return [
-        { color: 'audit-dot-red', title: 'Aucun site web' },
-        { color: 'audit-dot-gray', title: 'N/A' },
-        { color: 'audit-dot-gray', title: 'N/A' },
-        { color: 'audit-dot-gray', title: 'N/A' }
+        { color: 'bg-red-500', title: 'Aucun site web' },
+        { color: 'bg-slate-300', title: 'N/A' },
+        { color: 'bg-slate-300', title: 'N/A' },
+        { color: 'bg-slate-300', title: 'N/A' }
       ];
     }
     return [
-      { color: 'audit-dot-green', title: 'Site web présent' },
-      { color: lead.has_ssl ? 'audit-dot-green' : 'audit-dot-red', title: lead.has_ssl ? 'SSL actif' : 'Pas de SSL' },
-      { color: lead.is_mobile_friendly ? 'audit-dot-green' : 'audit-dot-yellow', title: lead.is_mobile_friendly ? 'Mobile-friendly' : 'Non optimisé mobile' },
-      { color: lead.has_chat_widget ? 'audit-dot-green' : 'audit-dot-red', title: lead.has_chat_widget ? 'Widget chat/booking' : 'Aucune automatisation' }
+      { color: 'bg-emerald-500', title: 'Site web présent' },
+      { color: lead.has_ssl ? 'bg-emerald-500' : 'bg-red-500', title: lead.has_ssl ? 'SSL actif' : 'Pas de SSL' },
+      { color: lead.is_mobile_friendly ? 'bg-emerald-500' : 'bg-amber-500', title: lead.is_mobile_friendly ? 'Mobile-friendly' : 'Non optimisé mobile' },
+      { color: lead.has_chat_widget ? 'bg-emerald-500' : 'bg-red-500', title: lead.has_chat_widget ? 'Widget chat/booking' : 'Aucune automatisation' }
     ];
   };
 
-  // Parse social handles JSON safely
-  const parseSocialHandles = (jsonStr) => {
-    if (!jsonStr) return {};
-    try {
-      return JSON.parse(jsonStr);
-    } catch {
-      return {};
-    }
-  };
-
   return (
-    <div>
+    <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex-between mb-20">
+      <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div>
-          <h2>Gestionnaire de Prospects</h2>
-          <p style={{ color: '#a3a3a3', fontSize: '14px', marginTop: '4px' }}>
-            Importez, analysez et qualifiez vos cibles avec l'audit digital automatisé.
+          <h2 className="text-2xl font-heading font-extrabold text-slate-800">Gestionnaire de Prospects</h2>
+          <p className="text-slate-500 text-sm mt-1">
+            Importez, qualifiez vos cibles et pilotez votre CRM prospection.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* CRM View Toggle (Board vs List) */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: '3px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)', marginRight: '8px' }}>
+        
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* View Toggle */}
+          <div className="flex bg-slate-200/80 p-1 rounded-xl border border-slate-300/40">
             <button 
-              className={`btn btn-sm`}
-              style={{ 
-                padding: '6px 12px', 
-                borderRadius: '8px', 
-                background: viewMode === 'board' ? 'var(--primary)' : 'transparent',
-                borderColor: 'transparent',
-                color: '#fff',
-                boxShadow: viewMode === 'board' ? '0 2px 8px var(--primary-glow)' : 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'board' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               onClick={() => setViewMode('board')}
-              title="Affichage Pipeline / Kanban CRM"
             >
-              <Kanban style={{ width: '13px' }} />
+              <Kanban className="w-3.5 h-3.5" />
               Pipeline
             </button>
             <button 
-              className={`btn btn-sm`}
-              style={{ 
-                padding: '6px 12px', 
-                borderRadius: '8px', 
-                background: viewMode === 'list' ? 'var(--primary)' : 'transparent',
-                borderColor: 'transparent',
-                color: '#fff',
-                boxShadow: viewMode === 'list' ? '0 2px 8px var(--primary-glow)' : 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'list' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               onClick={() => setViewMode('list')}
-              title="Affichage Liste / Table de données"
             >
-              <LayoutList style={{ width: '13px' }} />
+              <LayoutList className="w-3.5 h-3.5" />
               Table
             </button>
           </div>
 
           {selectedLeadIds.length > 0 && (
-            <button 
-              className="btn btn-danger btn-sm"
-              onClick={() => handleDeleteLeads(selectedLeadIds)}
-              disabled={actionInProgress}
-            >
-              <Trash2 style={{ width: '14px' }} />
+            <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-semibold text-xs transition-colors" onClick={() => handleDeleteLeads(selectedLeadIds)}>
+              <Trash2 className="w-4 h-4" />
               Supprimer ({selectedLeadIds.length})
             </button>
           )}
-          <button 
-            className="btn btn-export btn-sm"
-            onClick={handleExportCSV}
-            disabled={filteredLeads.length === 0}
-            title="Exporter les prospects filtrés en CSV"
-          >
-            <Download style={{ width: '14px' }} />
+
+          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-colors" onClick={handleExportCSV} disabled={filteredLeads.length === 0}>
+            <Download className="w-4 h-4" />
             Exporter CSV
           </button>
+          
           <button 
-            className="btn btn-secondary btn-sm"
+            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-colors"
             onClick={() => {
-              setImportStep(1);
-              setUploadedFileName('');
-              setParsedHeaders([]);
-              setParsedRows([]);
-              setColumnMappings({});
-              setImportError('');
-              setShowImportModal(true);
+              setImportStep(1); setUploadedFileName(''); setParsedHeaders([]); setParsedRows([]); setColumnMappings({}); setImportError(''); setShowImportModal(true);
             }}
-            title="Importer des prospects depuis un fichier JSON, CSV ou Excel"
           >
-            <Upload style={{ width: '14px' }} />
+            <Upload className="w-4 h-4" />
             Importer
           </button>
+
           <button 
-            className="btn btn-secondary btn-sm"
+            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold text-xs transition-colors"
             onClick={handleCleanDuplicates}
             disabled={actionInProgress}
-            style={{ color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.15)', background: 'rgba(251, 191, 36, 0.03)' }}
-            title="Éliminer tous les doublons de prospects de la base de données"
           >
-            <Sparkles style={{ width: '14px', color: '#fbbf24' }} />
+            <Sparkles className="w-4 h-4 text-amber-600" />
             Nettoyer Doublons
           </button>
-          <button 
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowAddModal(true)}
-          >
-            <Plus style={{ width: '14px' }} />
-            Ajouter
+
+          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-sm hover:bg-teal-700 transition-colors" onClick={() => setShowAddModal(true)}>
+            <Plus className="w-4 h-4" />
+            Créer
           </button>
         </div>
       </div>
 
-      {/* GOOGLE MAPS LINK SCRAPER WIDGET */}
-      <div className="glass-panel mb-20" style={{ border: '1px solid rgba(0,188,125,0.15)', background: 'rgba(0, 188, 125, 0.02)' }}>
-        <h4 style={{ fontSize: '14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px', color: '#00BC7D' }}>
-          <Sparkles style={{ width: '16px' }} />
-          Extracteur Google Maps & Audit Digital Automatique
+      {/* PROSPECTING SEARCH WIZARD */}
+      <div className="bg-teal-50/20 border border-teal-500/15 rounded-2xl p-6">
+        <h4 className="font-heading font-extrabold text-teal-800 text-sm mb-1.5 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-teal-600" />
+          Extraction Intelligente de Prospects (Google Maps & Base de Données France)
         </h4>
-        <p style={{ color: '#a3a3a3', fontSize: '12px', marginBottom: '14px' }}>
-          Collez le lien de votre recherche Google Maps. Le système extrait les établissements, <strong>élimine ceux sans site web</strong>, détecte les failles digitales et classe tout par catégories hermétiques.
+        <p className="text-slate-500 text-xs mb-5">
+          Sélectionnez votre source de données, affinez le ciblage géographique et planifiez la qualification immédiate des entreprises.
         </p>
-        <form onSubmit={handleMapsLinkScrape} className="flex-responsive">
-          <div style={{ flex: 1, position: 'relative' }}>
-            <Link2 style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '16px', color: '#666' }} />
-            <input 
-              type="url" 
-              className="form-control" 
-              style={{ paddingLeft: '38px', borderColor: 'rgba(0, 188, 125, 0.2)' }}
-              placeholder="Ex: https://www.google.com/maps/search/Plombiers+Bordeaux/..." 
-              value={googleMapsUrl}
-              onChange={(e) => setGoogleMapsUrl(e.target.value)}
-              required
-            />
+        
+        <form onSubmit={handleLaunchProspecting} className="space-y-4">
+          {/* Source Options Toggle */}
+          <div className="flex gap-2 max-w-md bg-slate-200/40 p-1 rounded-lg border border-slate-200/60 text-2xs font-bold text-slate-600">
+            <button 
+              type="button" 
+              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'maps' ? 'bg-white text-slate-800 shadow-sm' : 'hover:text-slate-800'}`}
+              onClick={() => { setScrapeSource('maps'); setUseRawLink(false); }}
+            >
+              Google Maps (Direct)
+            </button>
+            <button 
+              type="button" 
+              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'database' ? 'bg-white text-slate-800 shadow-sm' : 'hover:text-slate-800'}`}
+              onClick={() => { setScrapeSource('database'); setUseRawLink(false); }}
+            >
+              Base Nationale (France CSV)
+            </button>
           </div>
-          <button 
-            type="submit" 
-            className="btn btn-primary btn-sm"
-            style={{ minWidth: '180px' }}
-            disabled={mapsScraping}
-          >
-            {mapsScraping ? (
-              <>
-                <RefreshCw style={{ width: '14px', animation: 'spin 1s linear infinite' }} />
-                Scraping en cours...
-              </>
-            ) : (
-              'Scraper cette Zone'
+
+          {!useRawLink ? (
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+              <div className="md:col-span-4">
+                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Catégorie recherchée</label>
+                <input 
+                  type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  placeholder="Ex: Plombier, Menuisier, Electricien..."
+                  value={searchCategory} onChange={(e) => setSearchCategory(e.target.value)}
+                  required={!useRawLink}
+                />
+              </div>
+              <div className="md:col-span-4">
+                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Ville cible</label>
+                <input 
+                  type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  placeholder="Ex: Nantes, Lyon, Bordeaux..."
+                  value={searchCity} onChange={(e) => setSearchCity(e.target.value)}
+                  required={!useRawLink}
+                />
+              </div>
+              {scrapeSource === 'maps' && (
+                <div className="md:col-span-2">
+                  <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Rayon (km)</label>
+                  <input 
+                    type="number" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                    min="1" max="50"
+                    value={searchRadius} onChange={(e) => setSearchRadius(parseInt(e.target.value) || 5)}
+                  />
+                </div>
+              )}
+              <div className="md:col-span-2 flex items-end">
+                <button type="submit" className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
+                  {mapsScraping ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                  Lancer
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 relative">
+                <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  type="url" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  placeholder="Collez le lien Google Maps complet ici..."
+                  value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)}
+                  required={useRawLink}
+                />
+              </div>
+              <button type="submit" className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
+                {mapsScraping ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Scraper'}
+              </button>
+            </div>
+          )}
+
+          {/* Scraper Advanced settings: DB vs Campaign Routing */}
+          <div className="flex flex-wrap gap-5 items-center pt-2 text-xs text-slate-600 border-t border-slate-200/40">
+            <label className="inline-flex items-center gap-2 cursor-pointer font-medium">
+              <input 
+                type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 w-3.5 h-3.5 border-slate-300"
+                checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)}
+              />
+              Enregistrer dans le CRM global (Base locale)
+            </label>
+
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Associer directement à une campagne :</span>
+              <select
+                className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none"
+                value={targetCampaignId} onChange={(e) => setTargetCampaignId(e.target.value)}
+                required={!saveToDb}
+              >
+                <option value="">-- Pas de campagne (CRM seul) --</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.channel})</option>
+                ))}
+              </select>
+            </div>
+
+            {scrapeSource === 'maps' && (
+              <button 
+                type="button" className="text-teal-600 hover:text-teal-700 font-semibold text-3xs uppercase tracking-wider ml-auto"
+                onClick={() => setUseRawLink(!useRawLink)}
+              >
+                {useRawLink ? "Rechercher par catégorie/ville" : "Importer via lien maps brut"}
+              </button>
             )}
-          </button>
+          </div>
         </form>
 
         {mapsScraping && (
-          <div style={{ marginTop: '14px', padding: '12px 16px', background: 'rgba(0,188,125,0.06)', borderRadius: '8px', border: '1px solid rgba(0,188,125,0.15)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: '#00BC7D', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="pulse-indicator"></span>
-                Robot d'extraction actif
+          <div className="mt-4 p-4 bg-teal-50 border border-teal-200/50 rounded-xl space-y-2">
+            <div className="flex justify-between items-center text-xs font-bold text-teal-800">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                </span>
+                Robot d'extraction et audit actif
               </span>
-              <span style={{ fontSize: '11px', color: '#888' }}>{scrapingSeconds}s écoulées</span>
+              <span className="text-slate-400">{scrapingSeconds}s</span>
             </div>
-            <p style={{ fontSize: '12px', color: '#e5e7eb', margin: 0, fontWeight: 500 }}>
-              {getScrapingProgressMessage()}
-            </p>
-            <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+            <p className="text-xs text-slate-700 font-medium">{getScrapingProgressMessage()}</p>
+            <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden">
               <div 
-                style={{ 
-                  height: '100%', 
-                  background: 'linear-gradient(90deg, #00BC7D, #87D6C2)', 
-                  width: `${Math.min(95, (scrapingSeconds / 75) * 100)}%`, 
-                  transition: 'width 1s linear' 
-                }} 
-              />
+                className="h-full bg-teal-600 transition-all duration-300"
+                style={{ width: `${Math.min(95, (scrapingSeconds / 75) * 100)}%` }}
+              ></div>
             </div>
-            <span style={{ fontSize: '10px', color: '#666' }}>Note: Le scraping réel de Google Maps peut prendre de 30 à 90 secondes selon la taille de la zone.</span>
           </div>
         )}
       </div>
 
-      {/* VULNERABILITY METRIC FLAGS SUMMARY BAR (PRD §4.2) */}
-      <div className="glass-panel mb-20" style={{ padding: '12px 20px' }}>
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
-            Indicateurs de Vulnérabilité
+      {/* VULNERABILITY METRIC FLAGS SUMMARY */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <div className="flex flex-wrap gap-4 items-center text-xs">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Indicateurs de faiblesses CRM
           </span>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <span className="vuln-flag vuln-flag-critical">
-              <Globe style={{ width: '10px' }} />
-              {vulnMetrics.noWebsite} sans site web
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-red-50 text-red-700 border border-red-100">
+              <Globe className="w-3 h-3" />
+              {vulnMetrics.noWebsite} sans site
             </span>
-            <span className="vuln-flag vuln-flag-warning">
-              <ShieldOff style={{ width: '10px' }} />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-amber-50 text-amber-700 border border-amber-100">
+              <ShieldOff className="w-3 h-3" />
               {vulnMetrics.noSSL} sans SSL
             </span>
-            <span className="vuln-flag vuln-flag-info">
-              <Smartphone style={{ width: '10px' }} />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+              <Smartphone className="w-3 h-3" />
               {vulnMetrics.noMobile} non mobile
             </span>
-            <span className="vuln-flag vuln-flag-info">
-              <MessageSquare style={{ width: '10px' }} />
-              {vulnMetrics.noAutomation} sans automatisation
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
+              <MessageSquare className="w-3 h-3" />
+              {vulnMetrics.noAutomation} sans auto.
             </span>
           </div>
         </div>
       </div>
 
       {/* STRICT CATEGORY TAB BAR */}
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' }}>
-          <span style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
-            Sections Catégories (Secteurs Hermétiques)
+      <div className="space-y-3">
+        <div className="flex justify-between items-center gap-4 flex-wrap">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Filtrer par Secteur d'activité
           </span>
-          {/* Sector Quick Search */}
-          <div style={{ position: 'relative', width: '180px' }}>
-            <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '12px', height: '12px', color: '#666' }} />
+          <div className="relative w-52">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input 
-              type="text" 
-              className="form-control form-control-sm" 
-              style={{ paddingLeft: '28px', height: '28px', borderRadius: '8px', fontSize: '11px', background: 'rgba(8, 8, 8, 0.4)', border: '1px solid rgba(255, 255, 255, 0.04)', color: '#fff' }}
+              type="text" className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:border-teal-500"
               placeholder="Rechercher un secteur..."
-              value={categorySearchTerm}
-              onChange={(e) => setCategorySearchTerm(e.target.value)}
+              value={categorySearchTerm} onChange={(e) => setCategorySearchTerm(e.target.value)}
             />
-            {categorySearchTerm && (
-              <button 
-                onClick={() => setCategorySearchTerm('')} 
-                style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '10px' }}
-              >
-                ✕
-              </button>
-            )}
           </div>
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <div className="flex flex-wrap gap-2">
           <button 
-            className={`btn btn-secondary btn-sm ${activeCategoryTab === 'All' ? 'active' : ''}`}
-            style={{ 
-              borderRadius: '10px',
-              background: activeCategoryTab === 'All' ? 'rgba(255,255,255,0.08)' : 'rgba(13,13,13,0.5)',
-              borderColor: activeCategoryTab === 'All' ? '#fff' : 'rgba(255,255,255,0.05)',
-              color: '#fff'
-            }}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === 'All' ? 'bg-slate-900 border-slate-950 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
             onClick={() => { setActiveCategoryTab('All'); setSelectedLeadIds([]); }}
           >
-            Tous les Secteurs ({leads.length})
+            Tous ({leads.length})
           </button>
           
           {filteredUniqueCategories.map(cat => {
@@ -1208,63 +1128,31 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             return (
               <button 
                 key={cat}
-                className={`btn btn-secondary btn-sm ${activeCategoryTab === cat ? 'active' : ''}`}
-                style={{ 
-                  borderRadius: '10px',
-                  background: activeCategoryTab === cat ? 'rgba(0,188,125,0.12)' : 'rgba(13,13,13,0.5)',
-                  borderColor: activeCategoryTab === cat ? '#00BC7D' : 'rgba(255,255,255,0.05)',
-                  color: activeCategoryTab === cat ? '#00BC7D' : '#a3a3a3'
-                }}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === cat ? 'bg-teal-600 border-teal-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
                 onClick={() => { setActiveCategoryTab(cat); setSelectedLeadIds([]); }}
               >
                 {cat} ({count})
               </button>
             );
           })}
-          {filteredUniqueCategories.length === 0 && categorySearchTerm && (
-            <span style={{ fontSize: '12px', color: '#666', padding: '6px 12px' }}>Aucun secteur trouvé</span>
-          )}
         </div>
       </div>
 
       {/* Advanced Filters Panel */}
-      <div className="glass-panel mb-20" style={{ padding: '14px 20px' }}>
-        <div className="flex-responsive">
-          {/* Search bar */}
-          <div style={{ flex: 2, minWidth: '200px', position: 'relative' }}>
-            <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '15px', color: '#666' }} />
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="sm:col-span-2 relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
-              type="text" 
-              className="form-control form-control-sm" 
-              style={{ paddingLeft: '36px', height: '38px', borderRadius: '10px' }}
-              placeholder={`Rechercher dans ${activeCategoryTab === 'All' ? 'tous les secteurs' : activeCategoryTab}...`} 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-sm focus:outline-none focus:border-teal-500"
+              placeholder="Rechercher nom, ville, adresse..." 
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-
-          {/* Sector / Category Filter */}
-          <div style={{ flex: 1, minWidth: '150px' }}>
+          <div>
             <select 
-              className="form-control" 
-              style={{ height: '38px', borderRadius: '10px', fontSize: '13px' }}
-              value={activeCategoryTab}
-              onChange={(e) => { setActiveCategoryTab(e.target.value); setSelectedLeadIds([]); }}
-            >
-              <option value="All">Tous les Secteurs</option>
-              {uniqueCategories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div style={{ flex: 1, minWidth: '130px' }}>
-            <select 
-              className="form-control" 
-              style={{ height: '38px', borderRadius: '10px', fontSize: '13px' }}
-              value={selectedStatus} 
-              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
             >
               <option value="All">Tous les Statuts</option>
               {PIPELINE_STATUSES.map(st => (
@@ -1272,28 +1160,20 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               ))}
             </select>
           </div>
-
-          {/* Email Filter */}
-          <div style={{ flex: 1, minWidth: '120px' }}>
+          <div>
             <select 
-              className="form-control" 
-              style={{ height: '38px', borderRadius: '10px', fontSize: '13px' }}
-              value={emailFilter} 
-              onChange={(e) => setEmailFilter(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              value={emailFilter} onChange={(e) => setEmailFilter(e.target.value)}
             >
               <option value="All">Email : Tous</option>
               <option value="Has Email">Avec Email</option>
               <option value="No Email">Sans Email</option>
             </select>
           </div>
-
-          {/* Website Filter (PRD §4.2) */}
-          <div style={{ flex: 1, minWidth: '120px' }}>
+          <div>
             <select 
-              className="form-control" 
-              style={{ height: '38px', borderRadius: '10px', fontSize: '13px' }}
-              value={websiteFilter} 
-              onChange={(e) => setWebsiteFilter(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              value={websiteFilter} onChange={(e) => setWebsiteFilter(e.target.value)}
             >
               <option value="All">Site : Tous</option>
               <option value="Has Website">Avec Site</option>
@@ -1303,114 +1183,80 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         </div>
       </div>
 
-      {/* Main Leads Table */}
-      {/* Main Leads CRM Workspace */}
+      {/* Main CRM Workspace (Pipeline vs List) */}
       {viewMode === 'board' ? (
-        <div className="crm-board-container" style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '16px', minHeight: '65vh' }}>
+        <div className="flex gap-4 overflow-x-auto pb-4 min-h-[60vh]">
           {PIPELINE_STATUSES.map(status => {
             const columnLeads = filteredLeads.filter(l => l.status === status);
+            const isDragOver = dragOverStatus === status;
             return (
               <div 
                 key={status} 
-                className={`crm-board-column ${dragOverStatus === status ? 'drag-over' : ''}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (dragOverStatus !== status) {
-                    setDragOverStatus(status);
-                  }
-                }}
+                className={`flex-shrink-0 w-72 rounded-2xl p-4 flex flex-col gap-3 border transition-all duration-200 ${isDragOver ? 'bg-teal-50/70 border-teal-500 shadow-inner' : 'bg-slate-100/60 border-slate-200/80'}`}
+                onDragOver={(e) => { e.preventDefault(); if (dragOverStatus !== status) setDragOverStatus(status); }}
                 onDragLeave={() => setDragOverStatus(null)}
                 onDrop={(e) => handleDrop(e, status)}
-                style={{
-                  flex: '0 0 280px',
-                  background: 'rgba(13, 13, 13, 0.4)',
-                  borderRadius: '16px',
-                  border: '1px solid rgba(255,255,255,0.04)',
-                  padding: '12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}
               >
                 {/* Column Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', marginBottom: '4px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200 mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                       {getStatusLabel(status)}
                     </span>
-                    <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: '#888', padding: '1px 6px', borderRadius: '10px' }}>
+                    <span className="text-2xs bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded-full font-bold">
                       {columnLeads.length}
                     </span>
                   </div>
                 </div>
 
-                {/* Column Cards Container */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', flex: 1, maxHeight: '65vh', padding: '2px' }}>
+                {/* Cards */}
+                <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[60vh] p-0.5">
                   {columnLeads.map(lead => {
-                    const vulnFlags = getVulnFlags(lead);
                     const auditDots = getAuditDots(lead);
-                    
+                    const isDragged = draggedLeadId === lead.id;
                     return (
                       <div
                         key={lead.id}
-                        draggable={true}
+                        draggable
                         onDragStart={(e) => handleDragStart(e, lead.id)}
                         onDragEnd={handleDragEnd}
-                        className="crm-board-card"
+                        className={`bg-white border border-slate-200 rounded-xl p-4 cursor-grab active:cursor-grabbing hover:shadow-md hover:border-teal-500 hover:-translate-y-0.5 transition-all duration-200 flex flex-col gap-3 ${isDragged ? 'opacity-40' : 'opacity-100'}`}
                         onClick={() => setActiveLeadDetails(lead)}
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--glass-border)',
-                          borderRadius: '12px',
-                          padding: '14px',
-                          cursor: 'grab',
-                          transition: 'all 0.2s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '8px',
-                          boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
-                          opacity: draggedLeadId === lead.id ? 0.4 : 1
-                        }}
                       >
-                        {/* Company Name */}
                         <div>
-                          <strong style={{ color: '#fff', fontSize: '13px', display: 'block', marginBottom: '2px' }} className="card-title-hover">
+                          <strong className="text-slate-800 text-sm block mb-1 group-hover:text-teal-600 transition-colors leading-tight">
                             {lead.name}
                           </strong>
-                          <span className="badge badge-contacting" style={{ fontSize: '10px', textTransform: 'none', background: 'rgba(135,214,194,0.04)', borderColor: 'rgba(135,214,194,0.1)', padding: '2px 6px' }}>
+                          <span className="inline-block bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2 py-0.5 text-3xs font-semibold">
                             {lead.category}
                           </span>
                         </div>
 
-                        {/* Location */}
                         {lead.city && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#888' }}>
-                            <MapPin style={{ width: '10px', height: '10px' }} />
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                            <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
                             <span>{lead.city}</span>
                           </div>
                         )}
 
-                        {/* Rating */}
                         {lead.rating && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Star style={{ width: '11px', fill: '#fbbf24', stroke: '#fbbf24' }} />
-                            <span style={{ fontSize: '11px', color: '#fbbf24', fontWeight: 700 }}>{lead.rating}</span>
-                            <span style={{ fontSize: '10px', color: '#555' }}>({lead.review_count})</span>
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3.5 h-3.5 fill-amber-400 stroke-amber-400" />
+                            <span className="text-xs font-bold text-amber-500">{lead.rating}</span>
+                            <span className="text-3xs text-slate-400">({lead.review_count})</span>
                           </div>
                         )}
 
-                        {/* Quick Contact & Audit Indicators */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '8px', marginTop: '4px' }}>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <Globe style={{ width: '12px', color: lead.website ? '#87D6C2' : '#333' }} title={lead.website || 'Pas de site'} />
-                            <Mail style={{ width: '12px', color: lead.email ? '#00BC7D' : '#333' }} title={lead.email || "Pas d'email"} />
-                            <Phone style={{ width: '12px', color: lead.phone ? '#fbbf24' : '#333' }} title={lead.phone || 'Pas de téléphone'} />
+                        <div className="flex justify-between items-center border-t border-slate-100 pt-2.5 mt-1">
+                          <div className="flex gap-2 text-slate-400">
+                            <Globe className={`w-3.5 h-3.5 ${lead.website ? 'text-teal-500' : 'text-slate-200'}`} />
+                            <Mail className={`w-3.5 h-3.5 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
+                            <Phone className={`w-3.5 h-3.5 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
                           </div>
                           
-                          {/* Mini Audit Dots */}
-                          <div className="audit-dots" style={{ gap: '3px' }}>
+                          <div className="flex gap-1">
                             {auditDots.map((dot, i) => (
-                              <span key={i} className={`audit-dot ${dot.color}`} style={{ width: '6px', height: '6px' }} title={dot.title}></span>
+                              <span key={i} className={`w-1.5 h-1.5 rounded-full ${dot.color}`} title={dot.title}></span>
                             ))}
                           </div>
                         </div>
@@ -1418,8 +1264,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                     );
                   })}
                   {columnLeads.length === 0 && (
-                    <div style={{ padding: '24px 10px', textAlign: 'center', color: '#444', fontSize: '11px', border: '1px dashed rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                      Déposer ici
+                    <div className="py-8 text-center text-slate-400 text-3xs border border-dashed border-slate-300/60 rounded-xl bg-slate-50/50">
+                      Déposez les prospects ici
                     </div>
                   )}
                 </div>
@@ -1428,424 +1274,352 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           })}
         </div>
       ) : (
-        <div className="glass-panel table-container">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           {filteredLeads.length === 0 ? (
-            <div style={{ padding: '60px 0', textAlign: 'center', color: '#666' }}>
-              <AlertTriangle style={{ width: '40px', height: '40px', margin: '0 auto 12px auto', opacity: 0.5 }} />
-              <h4>Aucun prospect dans cette section</h4>
-              <p style={{ fontSize: '12px', marginTop: '4px' }}>
-                {activeCategoryTab === 'All' 
-                  ? 'Importez des cibles en collant un lien Google Maps ci-dessus.' 
-                  : `Aucune entreprise enregistrée sous le secteur "${activeCategoryTab}" pour ces critères.`
-                }
-              </p>
+            <div className="text-center py-16 text-slate-400 space-y-2">
+              <AlertTriangle className="w-12 h-12 mx-auto opacity-30 text-teal-600" />
+              <h4 className="font-heading font-bold text-slate-700">Aucun prospect dans cette section</h4>
+              <p className="text-xs">Lancez une recherche ci-dessus pour peupler la liste.</p>
             </div>
           ) : (
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '40px', textAlign: 'center' }}>
-                    <input 
-                      type="checkbox" 
-                      onChange={handleSelectAll} 
-                      checked={filteredLeads.length > 0 && selectedLeadIds.length === filteredLeads.length}
-                    />
-                  </th>
-                  <th>Nom de l'Entreprise</th>
-                  <th>Secteur</th>
-                  <th>Ville</th>
-                  <th style={{ width: '100px' }}>Note Maps</th>
-                  <th style={{ width: '100px' }}>Contact</th>
-                  <th style={{ width: '80px' }}>Audit</th>
-                  <th>Vulnérabilités</th>
-                  <th>Pipeline</th>
-                  <th style={{ width: '140px', textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLeads.map((lead) => {
-                  const vulnFlags = getVulnFlags(lead);
-                  const auditDots = getAuditDots(lead);
-                  
-                  return (
-                    <tr key={lead.id} style={{ background: selectedLeadIds.includes(lead.id) ? 'rgba(0,188,125,0.02)' : '' }}>
-                      <td style={{ textAlign: 'center' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedLeadIds.includes(lead.id)}
-                          onChange={() => handleSelectLead(lead.id)}
-                        />
-                      </td>
-                      <td>
-                        <strong style={{ color: '#fff' }}>{lead.name}</strong>
-                      </td>
-                      <td>
-                        <span className="badge badge-contacting" style={{ fontSize: '11px', textTransform: 'none', background: 'rgba(135,214,194,0.04)', borderColor: 'rgba(135,214,194,0.1)' }}>
-                          {lead.category}
-                        </span>
-                      </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#a3a3a3' }}>
-                          <MapPin style={{ width: '12px', height: '12px' }} />
-                          {lead.city || '—'}
-                        </span>
-                      </td>
-                      {/* Rating */}
-                      <td>
-                        {lead.rating ? (
-                          <span className="rating-display">
-                            <Star style={{ width: '12px', fill: '#fbbf24', stroke: '#fbbf24' }} />
-                            <span className="rating-value">{lead.rating}</span>
-                            <span className="review-count">({lead.review_count || 0})</span>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold text-xs uppercase tracking-wider">
+                    <th className="p-4 w-10 text-center">
+                      <input 
+                        type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 border-slate-300"
+                        onChange={handleSelectAll} 
+                        checked={filteredLeads.length > 0 && selectedLeadIds.length === filteredLeads.length}
+                      />
+                    </th>
+                    <th className="p-4">Nom</th>
+                    <th className="p-4">Secteur</th>
+                    <th className="p-4">Ville</th>
+                    <th className="p-4">Note Maps</th>
+                    <th className="p-4">Contacts</th>
+                    <th className="p-4">Audit</th>
+                    <th className="p-4">Attributs</th>
+                    <th className="p-4">Pipeline</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {filteredLeads.map((lead) => {
+                    const vulnFlags = getVulnFlags(lead);
+                    const auditDots = getAuditDots(lead);
+                    
+                    return (
+                      <tr key={lead.id} className={`hover:bg-slate-50/50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-teal-50/20' : ''}`}>
+                        <td className="p-4 text-center">
+                          <input 
+                            type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 border-slate-300"
+                            checked={selectedLeadIds.includes(lead.id)}
+                            onChange={() => handleSelectLead(lead.id)}
+                          />
+                        </td>
+                        <td className="p-4 font-bold text-slate-800">{lead.name}</td>
+                        <td className="p-4">
+                          <span className="inline-block bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2.5 py-0.5 text-2xs font-semibold">
+                            {lead.category}
                           </span>
-                        ) : (
-                          <span style={{ fontSize: '12px', color: '#333' }}>—</span>
-                        )}
-                      </td>
-                      {/* Contact icons */}
-                      <td>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <Globe style={{ width: '14px', color: lead.website ? '#87D6C2' : '#333' }} title={lead.website || 'Pas de site'} />
-                          <Mail style={{ width: '14px', color: lead.email ? '#00BC7D' : '#333' }} title={lead.email || "Pas d'email"} />
-                          <Phone style={{ width: '14px', color: lead.phone ? '#fbbf24' : '#333' }} title={lead.phone || 'Pas de téléphone'} />
-                        </div>
-                      </td>
-                      {/* Digital Audit Health Dots */}
-                      <td>
-                        <div className="audit-dots">
-                          {auditDots.map((dot, i) => (
-                            <span key={i} className={`audit-dot ${dot.color}`} title={dot.title}></span>
-                          ))}
-                        </div>
-                      </td>
-                      {/* Vulnerability Flags */}
-                      <td>
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                          {vulnFlags.length === 0 ? (
-                            <span className="vuln-flag vuln-flag-success">
-                              <Check style={{ width: '10px' }} />
-                              OK
+                        </td>
+                        <td className="p-4 text-slate-500">
+                          <span className="inline-flex items-center gap-1 text-xs">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            {lead.city || '—'}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          {lead.rating ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-amber-500 font-bold">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 stroke-amber-400" />
+                              {lead.rating}
+                              <span className="text-3xs text-slate-400 font-normal">({lead.review_count || 0})</span>
                             </span>
-                          ) : (
-                            vulnFlags.slice(0, 2).map((flag, i) => (
-                              <span key={i} className={`vuln-flag ${flag.cls}`}>
-                                <flag.icon style={{ width: '10px' }} />
-                                {flag.label}
+                          ) : '—'}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex gap-2 text-slate-400">
+                            <Globe className={`w-4 h-4 ${lead.website ? 'text-teal-500' : 'text-slate-200'}`} />
+                            <Mail className={`w-4 h-4 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
+                            <Phone className={`w-4 h-4 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex gap-1">
+                            {auditDots.map((dot, i) => (
+                              <span key={i} className={`w-2.5 h-2.5 rounded-full ${dot.color}`} title={dot.title}></span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {vulnFlags.length === 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Check className="w-2.5 h-2.5" />
+                                OK
                               </span>
-                            ))
-                          )}
-                          {vulnFlags.length > 2 && (
-                            <span className="vuln-flag vuln-flag-warning" style={{ cursor: 'pointer' }} title={vulnFlags.slice(2).map(f => f.label).join(', ')}>
-                              +{vulnFlags.length - 2}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      {/* Pipeline Status */}
-                      <td>
-                        <span className={`badge ${getStatusBadgeClass(lead.status)}`}>
-                          {getStatusLabel(lead.status)}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', gap: '6px' }}>
-                          {lead.website && !lead.email && (
-                            <button 
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '4px 8px', borderRadius: '6px' }}
-                              onClick={() => handleScrapeContactInfo(lead.id)}
-                              disabled={scrapingLeadId === lead.id}
-                              title="Crawler le site pour extraire emails & audit digital"
-                            >
-                              {scrapingLeadId === lead.id ? (
-                                <RefreshCw style={{ width: '12px', animation: 'spin 1s linear infinite' }} />
-                              ) : (
-                                <Globe style={{ width: '12px', color: '#00BC7D' }} />
-                              )}
+                            ) : (
+                              vulnFlags.slice(0, 2).map((flag, i) => (
+                                <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold border ${flag.cls}`}>
+                                  <flag.icon className="w-2.5 h-2.5" />
+                                  {flag.label}
+                                </span>
+                              ))
+                            )}
+                            {vulnFlags.length > 2 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold bg-amber-50 text-amber-700 border border-amber-200" title={vulnFlags.slice(2).map(f => f.label).join(', ')}>
+                                +{vulnFlags.length - 2}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-bold uppercase tracking-wider ${getStatusBadgeClass(lead.status)}`}>
+                            {getStatusLabel(lead.status)}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="inline-flex gap-2">
+                            {lead.website && !lead.email && (
+                              <button 
+                                className="p-1.5 text-slate-400 hover:text-teal-600 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors"
+                                onClick={() => handleScrapeContactInfo(lead.id)}
+                                disabled={scrapingLeadId === lead.id}
+                                title="Lancer l'audit digital"
+                              >
+                                {scrapingLeadId === lead.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                                ) : (
+                                  <Globe className="w-3.5 h-3.5 text-teal-500" />
+                                )}
+                              </button>
+                            )}
+                            <button className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors" onClick={() => setActiveLeadDetails(lead)}>
+                              <Eye className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                          <button 
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '4px 8px', borderRadius: '6px' }}
-                            onClick={() => setActiveLeadDetails(lead)}
-                            title="Voir la fiche détaillée"
-                          >
-                            <Eye style={{ width: '12px' }} />
-                          </button>
-                          <button 
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '4px 8px', borderRadius: '6px' }}
-                            onClick={() => handleDeleteLeads([lead.id])}
-                            title="Supprimer"
-                          >
-                            <Trash2 style={{ width: '12px', color: '#ef4444' }} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            <button className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 border border-slate-200 transition-colors" onClick={() => handleDeleteLeads([lead.id])}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {/* Modal: Add Manual Lead */}
+      {/* Modal: Create manual lead */}
       {showAddModal && (
-        <div className="modal-overlay">
-          <div className="modal-container">
-            <div className="modal-header">
-              <h3>Ajouter un Nouveau Prospect</h3>
-              <button className="tab-btn" onClick={() => setShowAddModal(false)}>✕</button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out]">
+            <div className="flex justify-between items-center p-5 border-b border-slate-100">
+              <h3 className="font-heading font-extrabold text-slate-800 text-lg">Ajouter un Prospect Manuel</h3>
+              <button className="text-slate-400 hover:text-slate-600" onClick={() => setShowAddModal(false)}>
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <form onSubmit={handleAddLeadSubmit}>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label className="form-label">Nom de l'entreprise *</label>
+              <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de l'entreprise *</label>
                   <input 
-                    type="text" className="form-control" required
+                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                     value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })}
                   />
                 </div>
-                <div className="row">
-                  <div className="col">
-                    <div className="form-group">
-                      <label className="form-label">Catégorie / Secteur *</label>
-                      <input 
-                        type="text" className="form-control" required
-                        value={newLead.category} onChange={(e) => setNewLead({ ...newLead, category: e.target.value })}
-                        placeholder="Ex: Plombier, Menuisier, Peintre"
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie *</label>
+                    <input 
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                      value={newLead.category} onChange={(e) => setNewLead({ ...newLead, category: e.target.value })}
+                      placeholder="Ex: Plombier, Menuisier..."
+                    />
                   </div>
-                  <div className="col">
-                    <div className="form-group">
-                      <label className="form-label">Ville</label>
-                      <input 
-                        type="text" className="form-control"
-                        value={newLead.city} onChange={(e) => setNewLead({ ...newLead, city: e.target.value })}
-                        placeholder="Ex: Paris"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ville</label>
+                    <input 
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      value={newLead.city} onChange={(e) => setNewLead({ ...newLead, city: e.target.value })}
+                      placeholder="Ex: Paris"
+                    />
                   </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Adresse complète</label>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Adresse</label>
                   <input 
-                    type="text" className="form-control"
+                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
                     value={newLead.address} onChange={(e) => setNewLead({ ...newLead, address: e.target.value })}
-                    placeholder="Ex: 12 Rue de la République, 69001 Lyon"
+                    placeholder="Ex: 45 Rue de Rivoli, 75001 Paris"
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Site Internet (URL)</label>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Site Internet</label>
                   <input 
-                    type="text" className="form-control"
+                    type="url" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
                     value={newLead.website} onChange={(e) => setNewLead({ ...newLead, website: e.target.value })}
-                    placeholder="http://www.exemple.fr"
+                    placeholder="https://www.exemple.fr"
                   />
                 </div>
-                <div className="row">
-                  <div className="col">
-                    <div className="form-group">
-                      <label className="form-label">Email</label>
-                      <input 
-                        type="email" className="form-control"
-                        value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email</label>
+                    <input 
+                      type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
+                    />
                   </div>
-                  <div className="col">
-                    <div className="form-group">
-                      <label className="form-label">Téléphone</label>
-                      <input 
-                        type="text" className="form-control"
-                        value={newLead.phone} onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Téléphone</label>
+                    <input 
+                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      value={newLead.phone} onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
+                    />
                   </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Notes initiales</label>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Notes</label>
                   <textarea 
-                    className="form-control"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[80px]"
                     value={newLead.notes} onChange={(e) => setNewLead({ ...newLead, notes: e.target.value })}
                   />
                 </div>
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={actionInProgress}>Ajouter</button>
+              <div className="flex justify-end gap-3 p-5 border-t border-slate-100 bg-slate-50">
+                <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150" onClick={() => setShowAddModal(false)}>Annuler</button>
+                <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150" disabled={actionInProgress}>Ajouter</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* HubSpot-style CRM Slide-in Side-Drawer */}
+      {/* Slide-in side drawer (CRM view) */}
       {activeLeadDetails && (
-        <div className="crm-drawer-overlay" onClick={() => setActiveLeadDetails(null)} style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.4)',
-          backdropFilter: 'blur(2px)',
-          zIndex: 1000,
-          display: 'flex',
-          justifyContent: 'flex-end',
-          animation: 'fadeIn 0.2s ease'
-        }}>
-          <div className="crm-drawer" onClick={(e) => e.stopPropagation()} style={{
-            width: '100%',
-            maxWidth: '550px',
-            background: '#0d0d0d',
-            height: '100vh',
-            borderLeft: '1px solid var(--glass-border)',
-            boxShadow: '-10px 0 40px rgba(0,0,0,0.6)',
-            display: 'flex',
-            flexDirection: 'column',
-            animation: 'drawerSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-          }}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex justify-end transition-opacity" onClick={() => setActiveLeadDetails(null)}>
+          <div className="w-full max-w-lg bg-white h-screen border-l border-slate-200 shadow-2xl flex flex-col justify-between animate-[drawerSlideIn_0.3s_cubic-bezier(0.16,1,0.3,1)]" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div style={{ padding: '24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="p-6 border-b border-slate-100 flex justify-between items-start">
               <div>
-                <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#fff', fontSize: '18px' }}>
-                  <Building2 style={{ width: '18px', color: 'var(--primary)' }} />
+                <h3 className="font-heading font-extrabold text-slate-800 text-lg flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-teal-600" />
                   {activeLeadDetails.name}
                 </h3>
-                <span className={`badge ${getStatusBadgeClass(activeLeadDetails.status)}`} style={{ transform: 'scale(0.85)', transformOrigin: 'left', marginTop: '6px', display: 'inline-flex' }}>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-3xs font-bold uppercase tracking-wider mt-2 ${getStatusBadgeClass(activeLeadDetails.status)}`}>
                   {getStatusLabel(activeLeadDetails.status)}
                 </span>
               </div>
-              <button 
-                className="btn btn-secondary btn-sm" 
-                style={{ padding: '4px 8px', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={() => setActiveLeadDetails(null)}
-              >
-                ✕
+              <button className="text-slate-400 hover:text-slate-600 p-1" onClick={() => setActiveLeadDetails(null)}>
+                <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Scrollable Body */}
-            <div style={{ padding: '24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="p-6 overflow-y-auto flex-grow space-y-6">
               
-              {/* Profile Overview Card */}
-              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
-                <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
+              {/* Profile Overview */}
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
                   Profil Général
                 </span>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', fontSize: '13px' }}>
+                <div className="grid grid-cols-2 gap-4 text-xs">
                   <div>
-                    <span style={{ color: '#555', display: 'block', fontSize: '11px' }}>SECTEUR</span>
-                    <strong style={{ color: '#fff' }}>{activeLeadDetails.category}</strong>
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Secteur</span>
+                    <strong className="text-slate-800 font-bold">{activeLeadDetails.category}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#555', display: 'block', fontSize: '11px' }}>VILLE / LOCALITÉ</span>
-                    <strong style={{ color: '#fff' }}>{activeLeadDetails.city || '—'}</strong>
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Localité</span>
+                    <strong className="text-slate-800 font-bold">{activeLeadDetails.city || '—'}</strong>
                   </div>
                   {activeLeadDetails.rating && (
-                    <div style={{ gridColumn: 'span 2' }}>
-                      <span style={{ color: '#555', display: 'block', fontSize: '11px' }}>NOTES GOOGLE MAPS</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                        <Star style={{ width: '13px', fill: '#fbbf24', stroke: '#fbbf24' }} />
-                        <strong style={{ color: '#fff', fontSize: '14px' }}>{activeLeadDetails.rating}</strong>
-                        <span style={{ color: '#666', fontSize: '11px' }}>({activeLeadDetails.review_count || 0} avis)</span>
+                    <div className="col-span-2">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Avis Google Maps</span>
+                      <div className="flex items-center gap-1">
+                        <Star className="w-4 h-4 fill-amber-400 stroke-amber-400" />
+                        <strong className="text-slate-800 text-sm font-bold">{activeLeadDetails.rating}</strong>
+                        <span className="text-slate-400 text-2xs">({activeLeadDetails.review_count || 0} avis)</span>
                       </div>
                     </div>
                   )}
                   {activeLeadDetails.address && (
-                    <div style={{ gridColumn: 'span 2' }}>
-                      <span style={{ color: '#555', display: 'block', fontSize: '11px' }}>ADRESSE POSTALE</span>
-                      <span style={{ color: '#a3a3a3' }}>{activeLeadDetails.address}</span>
+                    <div className="col-span-2">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Adresse</span>
+                      <span className="text-slate-600">{activeLeadDetails.address}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Contact Channels */}
-              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
-                <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
-                  Coordonnées & Liens
+              {/* Contact details */}
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                  Coordonnées
                 </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
-                  
-                  {/* Website */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <Globe style={{ width: '14px', color: activeLeadDetails.website ? '#87D6C2' : '#444' }} />
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>SITE INTERNET</span>
+                <div className="space-y-3 text-xs">
+                  {/* Web */}
+                  <div className="flex items-start gap-3">
+                    <Globe className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Site Internet</span>
                       {activeLeadDetails.website ? (
-                        <a href={activeLeadDetails.website} target="_blank" rel="noreferrer" style={{ color: '#87D6C2', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                        <a href={activeLeadDetails.website} target="_blank" rel="noreferrer" className="text-teal-600 hover:text-teal-700 font-semibold inline-flex items-center gap-1 mt-0.5">
                           {activeLeadDetails.website}
-                          <ExternalLink style={{ width: '10px' }} />
+                          <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span style={{ color: '#ef4444', fontSize: '11px' }}>Aucun site détecté (Cible Web Design)</span>
+                        <span className="text-red-500">Aucun site détecté (Cible Web Design)</span>
                       )}
                     </div>
                   </div>
-
                   {/* Email */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <Mail style={{ width: '14px', color: activeLeadDetails.email ? '#00BC7D' : '#444' }} />
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>EMAIL</span>
+                  <div className="flex items-start gap-3">
+                    <Mail className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Email</span>
                       {activeLeadDetails.email ? (
-                        <a href={`mailto:${activeLeadDetails.email}`} style={{ color: '#00BC7D', textDecoration: 'none', fontWeight: 600 }}>
+                        <a href={`mailto:${activeLeadDetails.email}`} className="text-teal-600 hover:text-teal-700 font-semibold mt-0.5 block">
                           {activeLeadDetails.email}
                         </a>
                       ) : (
-                        <span style={{ color: '#666', fontSize: '11px' }}>Non renseigné</span>
+                        <span className="text-slate-400">Non disponible</span>
                       )}
                     </div>
                   </div>
-
                   {/* Phone */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <Phone style={{ width: '14px', color: activeLeadDetails.phone ? '#fbbf24' : '#444' }} />
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>TÉLÉPHONE</span>
+                  <div className="flex items-start gap-3">
+                    <Phone className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Téléphone</span>
                       {activeLeadDetails.phone ? (
-                        <strong style={{ color: '#fff' }}>{activeLeadDetails.phone}</strong>
+                        <strong className="text-slate-800 block mt-0.5">{activeLeadDetails.phone}</strong>
                       ) : (
-                        <span style={{ color: '#666', fontSize: '11px' }}>Non renseigné</span>
+                        <span className="text-slate-400">Non disponible</span>
                       )}
                     </div>
                   </div>
-
-                  {/* Maps URL */}
-                  {activeLeadDetails.google_maps_url && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <MapPin style={{ width: '14px', color: '#60a5fa' }} />
-                      <div style={{ flex: 1 }}>
-                        <span style={{ fontSize: '10px', color: '#555', display: 'block' }}>GOOGLE MAPS</span>
-                        <a href={activeLeadDetails.google_maps_url} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          Fiche Google Maps
-                          <ExternalLink style={{ width: '10px' }} />
-                        </a>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Crawler trigger inside drawer */}
+              {/* Scraper action inside drawer */}
               {activeLeadDetails.website && !activeLeadDetails.email && (
-                <div style={{ padding: '14px', background: 'rgba(0,188,125,0.03)', border: '1px solid rgba(0,188,125,0.1)', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="bg-teal-50 border border-teal-100 rounded-xl p-4 flex justify-between items-center gap-3">
                   <div>
-                    <h5 style={{ fontSize: '12px', color: '#fff', margin: 0 }}>Crawler & Auditer ce site</h5>
-                    <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0 0' }}>Recherche d'emails et audit de sécurité SSL.</p>
+                    <h5 className="text-xs font-bold text-teal-800">Crawler le site du prospect</h5>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Scraping des emails et détection de sécurité.</p>
                   </div>
                   <button 
-                    className="btn btn-primary btn-sm"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 transition-colors"
                     onClick={() => handleScrapeContactInfo(activeLeadDetails.id)}
                     disabled={scrapingLeadId === activeLeadDetails.id}
                   >
                     {scrapingLeadId === activeLeadDetails.id ? (
-                      <RefreshCw style={{ width: '11px', animation: 'spin 1s linear infinite' }} />
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     ) : (
                       'Lancer'
                     )}
@@ -1853,64 +1627,50 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </div>
               )}
 
-              {/* Digital Maturity Audit */}
-              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
-                <h4 style={{ fontSize: '12px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: '#87D6C2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  <Shield style={{ width: '14px' }} />
-                  Audit Digital & Maturité
+              {/* Digital Maturity Audit details */}
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
+                <h4 className="font-heading font-extrabold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wider">
+                  <Shield className="w-4 h-4 text-teal-600" />
+                  Audit & Maturité Digitale
                 </h4>
-                <div className="enrichment-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div className="enrichment-card" style={{ padding: '10px' }}>
-                    <div className="enrichment-label" style={{ fontSize: '9px' }}>Certificat SSL</div>
-                    <div className={`enrichment-value ${activeLeadDetails.has_ssl ? 'positive' : 'negative'}`} style={{ fontSize: '12px' }}>
-                      {activeLeadDetails.has_ssl ? '✓ HTTPS Actif' : '✕ Non sécurisé (HTTP)'}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white border border-slate-200 rounded-lg p-3">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Certificat SSL</div>
+                    <div className={`text-xs font-semibold ${activeLeadDetails.has_ssl ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {activeLeadDetails.has_ssl ? '✓ HTTPS Actif' : '✕ Inexistant'}
                     </div>
                   </div>
-                  <div className="enrichment-card" style={{ padding: '10px' }}>
-                    <div className="enrichment-label" style={{ fontSize: '9px' }}>Optimisation Mobile</div>
-                    <div className={`enrichment-value ${activeLeadDetails.is_mobile_friendly ? 'positive' : 'negative'}`} style={{ fontSize: '12px' }}>
-                      {activeLeadDetails.is_mobile_friendly ? '✓ Responsive' : '✕ Non optimisé'}
+                  <div className="bg-white border border-slate-200 rounded-lg p-3">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Optimisation Mobile</div>
+                    <div className={`text-xs font-semibold ${activeLeadDetails.is_mobile_friendly ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {activeLeadDetails.is_mobile_friendly ? '✓ Adaptatif' : '✕ Non Responsive'}
                     </div>
                   </div>
-                  <div className="enrichment-card" style={{ padding: '10px' }}>
-                    <div className="enrichment-label" style={{ fontSize: '9px' }}>Widget Chat / Réservation</div>
-                    <div className={`enrichment-value ${activeLeadDetails.has_chat_widget ? 'positive' : 'negative'}`} style={{ fontSize: '12px' }}>
-                      {activeLeadDetails.has_chat_widget ? '✓ Présent' : '✕ Absent (Cible n8n)'}
+                  <div className="bg-white border border-slate-200 rounded-lg p-3">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Live Chat Widget</div>
+                    <div className={`text-xs font-semibold ${activeLeadDetails.has_chat_widget ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {activeLeadDetails.has_chat_widget ? '✓ Installé' : '✕ Manquant'}
                     </div>
                   </div>
-                  <div className="enrichment-card" style={{ padding: '10px' }}>
-                    <div className="enrichment-label" style={{ fontSize: '9px' }}>Stack Technique</div>
-                    <div className="enrichment-value" style={{ fontSize: '12px', color: activeLeadDetails.tech_stack ? '#fbbf24' : '#666' }}>
-                      {activeLeadDetails.tech_stack || 'Non détecté'}
+                  <div className="bg-white border border-slate-200 rounded-lg p-3">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Stack Technique</div>
+                    <div className="text-xs font-semibold text-slate-800">
+                      {activeLeadDetails.tech_stack || 'Non détectée'}
                     </div>
                   </div>
-                  {activeLeadDetails.load_time_ms && (
-                    <div className="enrichment-card" style={{ padding: '10px', gridColumn: 'span 2' }}>
-                      <div className="enrichment-label" style={{ fontSize: '9px' }}>Temps de Chargement</div>
-                      <div className={`enrichment-value ${activeLeadDetails.load_time_ms < 2000 ? 'positive' : activeLeadDetails.load_time_ms < 4000 ? 'neutral' : 'negative'}`} style={{ fontSize: '12px' }}>
-                        {activeLeadDetails.load_time_ms} ms
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Status Manager */}
-              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
-                <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, display: 'block', marginBottom: '10px' }}>
+              {/* Status Selector */}
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
                   Statut du Pipeline
                 </span>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {PIPELINE_STATUSES.map((st) => (
+                <div className="flex gap-2 flex-wrap">
+                  {PIPELINE_STATUSES.map(st => (
                     <button 
                       key={st} type="button" 
-                      className={`btn btn-secondary btn-sm ${activeLeadDetails.status === st ? 'active' : ''}`}
-                      style={{ 
-                        fontSize: '10px', 
-                        padding: '4px 8px',
-                        background: activeLeadDetails.status === st ? 'rgba(0,188,125,0.12)' : 'transparent',
-                        borderColor: activeLeadDetails.status === st ? '#00BC7D' : 'rgba(255,255,255,0.05)'
-                      }}
+                      className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${activeLeadDetails.status === st ? 'bg-teal-600 border-teal-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
                       onClick={() => handleUpdateStatus(activeLeadDetails.id, st)}
                     >
                       {getStatusLabel(st)}
@@ -1920,196 +1680,110 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               </div>
 
               {/* General Note */}
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notes Générales</label>
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Notes Générales</label>
                 <textarea 
-                  className="form-control" 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 min-h-[80px]" 
                   defaultValue={activeLeadDetails.notes} 
                   onBlur={(e) => handleSaveNotes(activeLeadDetails.id, e.target.value)}
-                  placeholder="Notes générales sur le prospect..."
-                  style={{ minHeight: '80px', fontSize: '12px', background: 'rgba(8, 8, 8, 0.4)' }}
+                  placeholder="Saisissez des notes sur ce prospect..."
                 />
               </div>
 
-              {/* Discussion History / Timeline */}
-              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
-                <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, display: 'block', marginBottom: '12px' }}>
-                  Suivi des Échanges (Conversations)
+              {/* Discussions & Timeline */}
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-4">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                  Historique des Échanges
                 </span>
 
-                {/* Form to add interaction */}
-                <form onSubmit={handleAddDiscussion} style={{ marginBottom: '16px' }}>
-                  {/* Select Interaction Type */}
-                  <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                {/* Form to add note */}
+                <form onSubmit={handleAddDiscussion} className="space-y-3">
+                  <div className="flex gap-1.5 flex-wrap">
                     {[
-                      { type: 'Note', label: 'Note', icon: FileText, color: '#9ca3af', bg: 'rgba(156, 163, 175, 0.1)' },
-                      { type: 'Email', label: 'Email', icon: Mail, color: '#00BC7D', bg: 'rgba(0, 188, 125, 0.1)' },
-                      { type: 'Call', label: 'Appel', icon: Phone, color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.1)' },
-                      { type: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle, color: '#87D6C2', bg: 'rgba(135, 214, 194, 0.1)' },
-                      { type: 'Meeting', label: 'RDV', icon: Calendar, color: '#c084fc', bg: 'rgba(192, 132, 252, 0.1)' }
+                      { type: 'Note', label: 'Note', icon: FileText, color: '#64748b', bg: 'bg-slate-50 border-slate-200 text-slate-600' },
+                      { type: 'Email', label: 'Email', icon: Mail, color: '#059669', bg: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                      { type: 'Call', label: 'Appel', icon: Phone, color: '#d97706', bg: 'bg-amber-50 border-amber-200 text-amber-700' },
+                      { type: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle, color: '#0d9488', bg: 'bg-teal-50 border-teal-200 text-teal-700' },
+                      { type: 'Meeting', label: 'RDV', icon: Calendar, color: '#7c3aed', bg: 'bg-violet-50 border-violet-200 text-violet-700' }
                     ].map(btn => {
                       const Icon = btn.icon;
                       const isSelected = discussionType === btn.type;
                       return (
                         <button
-                          key={btn.type}
-                          type="button"
+                          key={btn.type} type="button"
                           onClick={() => setDiscussionType(btn.type)}
-                          style={{
-                            flex: 1,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '4px',
-                            padding: '6px 2px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: isSelected ? btn.color : 'rgba(255,255,255,0.04)',
-                            background: isSelected ? btn.bg : 'rgba(255,255,255,0.01)',
-                            color: isSelected ? '#fff' : '#666',
-                            fontSize: '10px',
-                            fontWeight: isSelected ? '600' : '400',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease'
-                          }}
+                          className={`flex-1 flex flex-col items-center gap-1 p-2 rounded-xl border text-[9px] font-bold uppercase transition-all ${isSelected ? btn.bg : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                         >
-                          <Icon style={{ width: '14px', height: '14px', color: isSelected ? btn.color : '#555' }} />
+                          <Icon className="w-3.5 h-3.5" />
                           {btn.label}
                         </button>
                       );
                     })}
                   </div>
 
-                  {/* Input content */}
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <div className="flex gap-2">
                     <input
-                      type="text"
-                      className="form-control"
-                      value={discussionContent}
-                      onChange={(e) => setDiscussionContent(e.target.value)}
-                      placeholder={`Saisir le résumé de l'échange (${discussionType === 'Call' ? 'ex: Appel M. Lefebvre, intéressé' : discussionType === 'Email' ? 'ex: Devis envoyé' : 'ex: RDV planifié'})`}
-                      style={{ fontSize: '12px', padding: '8px 12px', height: '36px' }}
+                      type="text" className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-teal-500"
+                      value={discussionContent} onChange={(e) => setDiscussionContent(e.target.value)}
+                      placeholder={`Résumé de l'échange (${discussionType})...`}
                       required
                     />
                     <button
-                      type="submit"
-                      className="btn btn-primary btn-sm"
-                      style={{ height: '36px', padding: '0 12px', borderRadius: '12px', flexShrink: 0 }}
+                      type="submit" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700"
                       disabled={addingDiscussion || !discussionContent.trim()}
                     >
-                      {addingDiscussion ? <RefreshCw style={{ width: '12px', animation: 'spin 1s linear infinite' }} /> : 'Ajouter'}
+                      {addingDiscussion ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Ajouter'}
                     </button>
                   </div>
                 </form>
 
-                {/* Timeline Items */}
+                {/* Timeline list */}
                 {loadingDiscussions ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
-                    <RefreshCw style={{ width: '20px', height: '20px', color: '#00BC7D', animation: 'spin 1.2s linear infinite' }} />
+                  <div className="flex justify-center py-4">
+                    <RefreshCw className="w-5 h-5 animate-spin text-teal-600" />
                   </div>
                 ) : discussions.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '24px 0', border: '1px dashed rgba(255,255,255,0.04)', borderRadius: '8px', background: 'rgba(255,255,255,0.005)' }}>
-                    <MessageSquare style={{ width: '24px', height: '24px', color: '#333', margin: '0 auto 8px auto' }} />
-                    <p style={{ fontSize: '11px', color: '#555', margin: 0 }}>Aucun échange enregistré pour le moment.</p>
+                  <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-white/40">
+                    <MessageSquare className="w-5 h-5 mx-auto mb-2 text-slate-300" />
+                    <p className="text-3xs text-slate-400">Aucun échange pour le moment.</p>
                   </div>
                 ) : (
-                  <div 
-                    style={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: '12px', 
-                      maxHeight: '320px', 
-                      overflowY: 'auto', 
-                      paddingRight: '4px' 
-                    }}
-                  >
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                     {discussions.map((item) => {
-                      // Get config based on type
                       const configMap = {
-                        'Note': { icon: FileText, color: '#9ca3af', label: 'Note' },
-                        'Email': { icon: Mail, color: '#00BC7D', label: 'Email' },
-                        'Call': { icon: Phone, color: '#fbbf24', label: 'Appel' },
-                        'WhatsApp': { icon: MessageCircle, color: '#87D6C2', label: 'WhatsApp' },
-                        'Meeting': { icon: Calendar, color: '#c084fc', label: 'RDV' }
+                        'Note': { icon: FileText, color: 'text-slate-500', label: 'Note', bg: 'bg-slate-50 border-slate-200' },
+                        'Email': { icon: Mail, color: 'text-emerald-600', label: 'Email', bg: 'bg-emerald-50 border-emerald-200' },
+                        'Call': { icon: Phone, color: 'text-amber-500', label: 'Appel', bg: 'bg-amber-50 border-amber-200' },
+                        'WhatsApp': { icon: MessageCircle, color: 'text-teal-600', label: 'WhatsApp', bg: 'bg-teal-50 border-teal-200' },
+                        'Meeting': { icon: Calendar, color: 'text-violet-600', label: 'RDV', bg: 'bg-violet-50 border-violet-200' }
                       };
-                      const config = configMap[item.type] || { icon: FileText, color: '#9ca3af', label: item.type };
+                      const config = configMap[item.type] || { icon: FileText, color: 'text-slate-500', label: item.type, bg: 'bg-slate-50 border-slate-200' };
                       const ItemIcon = config.icon;
                       
-                      // Format date in French
                       const dateObj = new Date(item.created_at);
                       const formattedDate = isNaN(dateObj.getTime())
                         ? item.created_at
-                        : dateObj.toLocaleDateString('fr-FR', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          });
+                        : dateObj.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
                       return (
-                        <div 
-                          key={item.id} 
-                          className="timeline-item-row"
-                          style={{ 
-                            display: 'flex', 
-                            gap: '12px', 
-                            position: 'relative', 
-                            padding: '8px 10px', 
-                            background: 'rgba(255,255,255,0.01)', 
-                            border: '1px solid rgba(255,255,255,0.03)', 
-                            borderRadius: '10px' 
-                          }}
-                        >
-                          {/* Type Icon Indicator */}
-                          <div style={{
-                            width: '28px',
-                            height: '28px',
-                            borderRadius: '8px',
-                            background: `rgba(${item.type === 'Email' ? '0, 188, 125' : item.type === 'Call' ? '251, 191, 36' : item.type === 'WhatsApp' ? '135, 214, 194' : item.type === 'Meeting' ? '192, 132, 252' : '156, 163, 175'}, 0.08)`,
-                            border: `1px solid rgba(${item.type === 'Email' ? '0, 188, 125' : item.type === 'Call' ? '251, 191, 36' : item.type === 'WhatsApp' ? '135, 214, 194' : item.type === 'Meeting' ? '192, 132, 252' : '156, 163, 175'}, 0.2)`,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0
-                          }}>
-                            <ItemIcon style={{ width: '13px', height: '13px', color: config.color }} />
+                        <div key={item.id} className="relative group flex gap-3 p-3 bg-white border border-slate-150 rounded-xl">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${config.bg}`}>
+                            <ItemIcon className="w-4 h-4" />
                           </div>
 
-                          {/* Content */}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '2px' }}>
-                              <span style={{ fontSize: '10px', fontWeight: '600', color: config.color, textTransform: 'uppercase' }}>
-                                {config.label}
-                              </span>
-                              <span style={{ fontSize: '10px', color: '#555' }}>
-                                {formattedDate}
-                              </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-baseline mb-0.5">
+                              <span className={`text-[9px] font-bold uppercase ${config.color}`}>{config.label}</span>
+                              <span className="text-[9px] text-slate-400">{formattedDate}</span>
                             </div>
-                            <p style={{ fontSize: '12px', color: '#d1d5db', margin: 0, overflowWrap: 'anywhere' }}>
-                              {item.content}
-                            </p>
+                            <p className="text-xs text-slate-700 leading-normal overflow-wrap-anywhere">{item.content}</p>
                           </div>
 
-                          {/* Hover delete option */}
                           <button
-                            type="button"
-                            className="delete-item-btn"
+                            type="button" className="absolute top-2.5 right-2.5 text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
                             onClick={() => handleDeleteDiscussion(item.id)}
-                            style={{
-                              position: 'absolute',
-                              top: '8px',
-                              right: '8px',
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'rgba(239, 68, 68, 0.4)',
-                              cursor: 'pointer',
-                              padding: '2px',
-                              display: 'none',
-                              transition: 'color 0.15s ease'
-                            }}
-                            title="Supprimer cet échange"
                           >
-                            <Trash2 style={{ width: '11px', height: '11px' }} />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       );
@@ -2121,176 +1795,125 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             </div>
 
             {/* Footer */}
-            <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setActiveLeadDetails(null)}>Fermer</button>
+            <div className="p-4 border-t border-slate-100 flex justify-end bg-slate-50">
+              <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setActiveLeadDetails(null)}>Fermer</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Advanced Lead Import Wizard */}
+      {/* Modal: File Import Wizard */}
       {showImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" style={{ maxWidth: importStep === 2 ? '850px' : '550px', transition: 'max-width 0.3s ease' }}>
-            <div className="modal-header">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className={`w-full bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out] flex flex-col justify-between ${importStep === 2 ? 'max-w-4xl' : 'max-w-lg'}`}>
+            <div className="flex justify-between items-center p-5 border-b border-slate-100">
               <div>
-                <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <Upload style={{ width: '18px', color: '#00BC7D' }} />
-                  Assistant d'importation de cibles
+                <h3 className="font-heading font-extrabold text-slate-800 text-lg flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-teal-600" />
+                  Assistant d'importation de prospects
                 </h3>
-                <p style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                <p className="text-3xs text-slate-400 font-bold uppercase tracking-wider mt-1">
                   Étape {importStep} sur 4 : {
-                    importStep === 1 ? "Téléversement du fichier" :
-                    importStep === 2 ? "Classification & Correspondance des colonnes" :
-                    importStep === 3 ? "Importation en cours" : "Rapport d'importation"
+                    importStep === 1 ? "Téléversement" :
+                    importStep === 2 ? "Correspondance & classification" :
+                    importStep === 3 ? "Importation en cours" : "Rapport de fin"
                   }
                 </p>
               </div>
               {importStep !== 3 && (
-                <button className="tab-btn" onClick={() => setShowImportModal(false)}>✕</button>
+                <button className="text-slate-400 hover:text-slate-600" onClick={() => setShowImportModal(false)}>
+                  <X className="w-5 h-5" />
+                </button>
               )}
             </div>
             
-            <div className="modal-body" style={{ maxHeight: '70vh' }}>
-              {/* STEP 1: UPLOAD FILE */}
+            <div className="p-5 max-h-[65vh] overflow-y-auto">
+              {/* STEP 1 */}
               {importStep === 1 && (
-                <div>
-                  <p style={{ color: '#a3a3a3', fontSize: '13px', marginBottom: '16px' }}>
-                    Importez votre base de prospects externe au format <strong>JSON</strong>, <strong>CSV (délimiteur virgule ou point-virgule)</strong>, ou <strong>Excel (.xlsx, .xls)</strong>.
+                <div className="space-y-4">
+                  <p className="text-slate-500 text-sm">
+                    Sélectionnez un fichier <strong>JSON</strong>, <strong>CSV</strong>, ou <strong>Excel (.xlsx, .xls)</strong> contenant vos cibles.
                   </p>
                   
                   <div
                     onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
                     onDrop={(e) => {
-                      e.preventDefault();
-                      setIsDragging(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        handleFileSelection(e.dataTransfer.files[0]);
-                      }
+                      e.preventDefault(); setIsDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileSelection(e.dataTransfer.files[0]);
                     }}
                     onClick={() => document.getElementById('import-file-input').click()}
-                    style={{
-                      border: isDragging ? '2px dashed var(--primary)' : '2px dashed rgba(255,255,255,0.1)',
-                      borderRadius: '16px',
-                      padding: '50px 20px',
-                      textAlign: 'center',
-                      background: isDragging ? 'rgba(0,188,125,0.04)' : 'rgba(255,255,255,0.01)',
-                      cursor: 'pointer',
-                      transition: 'all 0.25s ease',
-                      boxShadow: isDragging ? '0 0 25px rgba(0, 188, 125, 0.15)' : 'none',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '12px'
-                    }}
+                    className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-4 ${isDragging ? 'border-teal-500 bg-teal-50/30' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50'}`}
                   >
                     <input 
-                      type="file" 
-                      id="import-file-input" 
-                      style={{ display: 'none' }} 
-                      accept=".json,.csv,.txt,.xlsx,.xls"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          handleFileSelection(e.target.files[0]);
-                        }
-                      }}
+                      type="file" id="import-file-input" className="hidden" accept=".json,.csv,.txt,.xlsx,.xls"
+                      onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileSelection(e.target.files[0]); }}
                     />
-                    <FileText style={{ width: '48px', height: '48px', color: isDragging ? 'var(--primary)' : '#666', transition: 'color 0.2s' }} />
+                    <FileText className={`w-12 h-12 ${isDragging ? 'text-teal-600' : 'text-slate-400'}`} />
                     <div>
-                      <strong style={{ color: '#fff', fontSize: '14px', display: 'block', marginBottom: '4px' }}>
-                        Glissez-déposez votre fichier ici
-                      </strong>
-                      <span style={{ color: '#666', fontSize: '12px' }}>
-                        Ou cliquez pour parcourir vos dossiers (JSON, CSV, XLSX, XLS)
-                      </span>
+                      <strong className="text-slate-800 text-sm block mb-1">Déposez votre fichier ici</strong>
+                      <span className="text-slate-400 text-xs">Ou cliquez pour parcourir les dossiers</span>
                     </div>
                   </div>
 
                   {importError && (
-                    <div className="glass-panel" style={{ marginTop: '16px', padding: '12px 16px', borderColor: 'rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                      <AlertTriangle style={{ width: '20px', height: '20px', color: 'var(--danger)', flexShrink: 0 }} />
-                      <span style={{ fontSize: '13px', color: '#f87171' }}>{importError}</span>
+                    <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                      <span>{importError}</span>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* STEP 2: COLUMN MAPPING & CLASSIFICATION */}
+              {/* STEP 2 */}
               {importStep === 2 && (
-                <div>
-                  <div className="glass-panel mb-20" style={{ padding: '14px 20px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                    <span style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', display: 'block', marginBottom: '10px', fontWeight: 600 }}>
-                      Paramètres de classification des cibles
-                    </span>
-                    <div className="row">
-                      <div className="col" style={{ padding: '5px' }}>
-                        <div className="form-group" style={{ marginBottom: '10px' }}>
-                          <label className="form-label" style={{ fontSize: '11px' }}>Secteur / Catégorie par défaut</label>
-                          <input 
-                            type="text" 
-                            className="form-control form-control-sm" 
-                            style={{ height: '34px', fontSize: '12px' }}
-                            placeholder="Ex: Plombier, Menuisier..." 
-                            value={defaultCategory}
-                            onChange={(e) => setDefaultCategory(e.target.value)}
-                            required
-                          />
-                          <span style={{ fontSize: '10px', color: '#555' }}>Attribué si la colonne Secteur est absente ou vide.</span>
-                        </div>
+                <div className="space-y-6">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Valeurs de classification par défaut</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Secteur / Catégorie *</label>
+                        <input 
+                          type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          value={defaultCategory} onChange={(e) => setDefaultCategory(e.target.value)} required
+                        />
                       </div>
-                      <div className="col" style={{ padding: '5px' }}>
-                        <div className="form-group" style={{ marginBottom: '10px' }}>
-                          <label className="form-label" style={{ fontSize: '11px' }}>Ville par défaut</label>
-                          <input 
-                            type="text" 
-                            className="form-control form-control-sm" 
-                            style={{ height: '34px', fontSize: '12px' }}
-                            placeholder="Ex: Paris, Lyon..." 
-                            value={defaultCity}
-                            onChange={(e) => setDefaultCity(e.target.value)}
-                          />
-                        </div>
+                      <div>
+                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Ville par défaut</label>
+                        <input 
+                          type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          value={defaultCity} onChange={(e) => setDefaultCity(e.target.value)}
+                        />
                       </div>
-                      <div className="col" style={{ padding: '5px' }}>
-                        <div className="form-group" style={{ marginBottom: '10px' }}>
-                          <label className="form-label" style={{ fontSize: '11px' }}>Pipeline initial</label>
-                          <select 
-                            className="form-control form-control-sm" 
-                            style={{ height: '34px', fontSize: '12px' }}
-                            value={defaultStatus}
-                            onChange={(e) => setDefaultStatus(e.target.value)}
-                          >
-                            {PIPELINE_STATUSES.map(st => (
-                              <option key={st} value={st}>{getStatusLabel(st)}</option>
-                            ))}
-                          </select>
-                        </div>
+                      <div>
+                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Statut initial</label>
+                        <select 
+                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}
+                        >
+                          {PIPELINE_STATUSES.map(st => (
+                            <option key={st} value={st}>{getStatusLabel(st)}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   </div>
 
-                  <h4 style={{ fontSize: '13px', marginBottom: '10px', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Correspondance des Colonnes
-                  </h4>
-                  <p style={{ color: '#a3a3a3', fontSize: '12px', marginBottom: '14px' }}>
-                    Associez les colonnes détectées dans votre fichier <strong>({uploadedFileName})</strong> aux attributs de notre système de prospection.
-                  </p>
+                  <div className="space-y-2">
+                    <h4 className="font-heading font-extrabold text-slate-800 text-sm">Correspondance des attributs</h4>
+                    <p className="text-slate-400 text-xs">Mappez les colonnes détectées dans <strong>{uploadedFileName}</strong> aux variables du CRM.</p>
+                  </div>
 
-                  <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', background: 'rgba(8,8,8,0.5)', padding: '10px 16px', marginBottom: '20px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '8px', fontSize: '11px', color: '#666', fontWeight: 600 }}>
-                      <span>ATTRIBUT BASE DE DONNÉES</span>
-                      <span>COLONNE DU FICHIER</span>
+                  <div className="border border-slate-200 rounded-xl bg-slate-50/50 p-4 max-h-48 overflow-y-auto space-y-2.5">
+                    <div className="grid grid-cols-2 gap-4 pb-2 border-b border-slate-200 text-3xs font-bold text-slate-400 uppercase">
+                      <span>Variable base locale</span>
+                      <span>Colonne de votre fichier</span>
                     </div>
-                    {DATABASE_FIELDS.map((field) => (
-                      <div key={field.key} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                        <span style={{ fontSize: '13px', color: field.required ? '#fff' : '#a3a3a3', fontWeight: field.required ? 600 : 400 }}>
-                          {field.label}
-                        </span>
+                    {DATABASE_FIELDS.map(field => (
+                      <div key={field.key} className="grid grid-cols-2 gap-4 items-center">
+                        <span className={`text-xs ${field.required ? 'font-bold text-slate-800' : 'text-slate-500'}`}>{field.label}</span>
                         <select
-                          className="form-control form-control-sm"
-                          style={{ height: '32px', fontSize: '12px', padding: '4px 8px', borderRadius: '6px' }}
+                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none"
                           value={columnMappings[field.key] || ''}
                           onChange={(e) => setColumnMappings({ ...columnMappings, [field.key]: e.target.value })}
                         >
@@ -2303,204 +1926,117 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                     ))}
                   </div>
 
-                  {/* DATA PREVIEW TABLE */}
-                  <h4 style={{ fontSize: '13px', marginBottom: '10px', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Aperçu Dynamique de l'import (3 premières lignes)
-                  </h4>
-                  <div className="table-container" style={{ margin: 0, maxHeight: '150px' }}>
-                    <table className="custom-table" style={{ fontSize: '12px' }}>
-                      <thead>
-                        <tr>
-                          {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => (
-                            <th key={f.key} style={{ padding: '8px 12px' }}>{f.label.replace(' *', '')}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parsedRows.slice(0, 3).map((row, idx) => (
-                          <tr key={idx}>
-                            {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => {
-                              const col = columnMappings[f.key];
-                              let displayVal = row[col];
-                              if (typeof displayVal === 'object') {
-                                displayVal = JSON.stringify(displayVal);
-                              }
-                              // Fallback display
-                              if (f.key === 'category' && !displayVal) {
-                                displayVal = defaultCategory;
-                              }
-                              if (f.key === 'city' && !displayVal) {
-                                displayVal = defaultCity || '—';
-                              }
-                              return (
-                                <td key={f.key} style={{ padding: '8px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px' }}>
-                                  {displayVal !== undefined && displayVal !== null && displayVal !== '' ? String(displayVal) : '—'}
-                                </td>
-                              );
-                            })}
+                  <div className="space-y-2">
+                    <h4 className="font-heading font-extrabold text-slate-800 text-sm">Aperçu de l'Importation</h4>
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-32">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-bold">
+                            {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => (
+                              <th key={f.key} className="p-2.5 whitespace-nowrap">{f.label.replace(' *', '')}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {parsedRows.slice(0, 3).map((row, idx) => (
+                            <tr key={idx} className="border-b border-slate-100 last:border-b-0 text-slate-600">
+                              {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => {
+                                const col = columnMappings[f.key];
+                                let val = row[col];
+                                if (typeof val === 'object') val = JSON.stringify(val);
+                                if (f.key === 'category' && !val) val = defaultCategory;
+                                if (f.key === 'city' && !val) val = defaultCity || '—';
+                                return (
+                                  <td key={f.key} className="p-2.5 whitespace-nowrap max-w-[150px] overflow-hidden text-ellipsis">{val !== undefined && val !== '' ? String(val) : '—'}</td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* STEP 3: IMPORTING STATE */}
+              {/* STEP 3 */}
               {importStep === 3 && (
-                <div style={{ padding: '40px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-                  <RefreshCw style={{ width: '48px', height: '48px', color: 'var(--primary)', animation: 'spin 1.2s linear infinite' }} />
-                  <div style={{ textAlign: 'center' }}>
-                    <h4 style={{ fontSize: '15px', color: '#fff' }}>Importation et qualification active...</h4>
-                    <p style={{ fontSize: '12px', color: '#a3a3a3', marginTop: '6px' }}>
-                      Traitement de {parsedRows.length} prospects en base. De-duplication automatique en cours...
-                    </p>
+                <div className="py-12 flex flex-col items-center justify-center gap-4 text-center">
+                  <RefreshCw className="w-12 h-12 text-teal-600 animate-spin" />
+                  <div>
+                    <h4 className="font-heading font-extrabold text-slate-800 text-base">Traitement de l'importation...</h4>
+                    <p className="text-slate-500 text-xs mt-1">Nettoyage, indexation et de-duplication en tâche de fond.</p>
                   </div>
-                  
-                  <div style={{ width: '100%', maxWidth: '350px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#888', marginBottom: '6px' }}>
+                  <div className="w-full max-w-xs">
+                    <div className="flex justify-between text-2xs font-bold text-slate-400 mb-1.5 uppercase">
                       <span>Progression</span>
                       <span>{importProgress}%</span>
                     </div>
-                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div 
-                        style={{ 
-                          height: '100%', 
-                          background: 'linear-gradient(90deg, #00BC7D, #87D6C2)', 
-                          width: `${importProgress}%`, 
-                          transition: 'width 0.15s ease' 
-                        }} 
-                      />
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-teal-600 transition-all duration-300" style={{ width: `${importProgress}%` }}></div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* STEP 4: SUCCESS OVERVIEW */}
+              {/* STEP 4 */}
               {importStep === 4 && (
-                <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-                  <div style={{ 
-                    width: '64px', 
-                    height: '64px', 
-                    borderRadius: '50%', 
-                    background: 'rgba(0,188,125,0.1)', 
-                    border: '2px solid var(--primary)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    boxShadow: '0 0 20px rgba(0,188,125,0.2)'
-                  }}>
-                    <Check style={{ width: '32px', height: '32px', color: 'var(--primary)' }} />
+                <div className="py-6 flex flex-col items-center justify-center gap-5 text-center">
+                  <div className="w-14 h-14 bg-emerald-50 border-2 border-emerald-500 rounded-full flex items-center justify-center text-emerald-600 shadow-sm shadow-emerald-500/10">
+                    <Check className="w-8 h-8" />
                   </div>
-                  
-                  <div style={{ textAlign: 'center' }}>
-                    <h3 style={{ fontSize: '18px', color: '#fff', marginBottom: '6px' }}>Importation complétée avec succès !</h3>
-                    <p style={{ fontSize: '13px', color: '#a3a3a3' }}>
-                      Votre base de données de cibles a été enrichie et qualifiée sous le secteur "{defaultCategory}".
-                    </p>
+                  <div>
+                    <h3 className="font-heading font-extrabold text-slate-800 text-lg">Importation complétée !</h3>
+                    <p className="text-slate-500 text-sm mt-1">Vos prospects ont été correctement importés et qualifiés.</p>
                   </div>
-
-                  <div className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '16px 20px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', display: 'block', marginBottom: '10px', fontWeight: 600 }}>
-                      Rapport d'analyse de la base
-                    </span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#a3a3a3' }}>Total prospects traités :</span>
-                        <strong style={{ color: '#fff' }}>{importResult.total}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#a3a3a3' }}>Prospects importés & classés :</span>
-                        <strong style={{ color: '#00BC7D' }}>+{importResult.inserted}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#a3a3a3' }}>Doublons ignorés (sécurité) :</span>
-                        <strong style={{ color: '#fbbf24' }}>{importResult.skipped}</strong>
-                      </div>
+                  <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-left text-xs text-slate-600">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Rapport d'activité</span>
+                    <div className="flex justify-between">
+                      <span>Total des cibles analysées :</span>
+                      <strong className="text-slate-800">{importResult.total}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Prospects importés :</span>
+                      <strong className="text-emerald-600">+{importResult.inserted}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Doublons ignorés (sécurité) :</span>
+                      <strong className="text-amber-600">{importResult.skipped}</strong>
                     </div>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="modal-footer">
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
               {importStep === 1 && (
-                <button type="button" className="btn btn-secondary" onClick={() => setShowImportModal(false)}>Fermer</button>
+                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setShowImportModal(false)}>Fermer</button>
               )}
-              
               {importStep === 2 && (
                 <>
-                  <button type="button" className="btn btn-secondary" onClick={() => setImportStep(1)}>Précédent</button>
-                  <button 
-                    type="button" 
-                    className="btn btn-primary" 
-                    onClick={handleLaunchImport}
-                    disabled={!columnMappings.name}
-                  >
-                    Lancer l'importation ({parsedRows.length} prospects)
+                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setImportStep(1)}>Précédent</button>
+                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 disabled:opacity-50" onClick={handleLaunchImport} disabled={!columnMappings.name}>
+                    Lancer l'import ({parsedRows.length} prospects)
                   </button>
                 </>
               )}
-
               {importStep === 4 && (
-                <button type="button" className="btn btn-primary" onClick={() => setShowImportModal(false)}>Terminer</button>
+                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700" onClick={() => setShowImportModal(false)}>Terminer</button>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Animation spin styles */}
+      {/* Animation keyframes */}
       <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
         @keyframes drawerSlideIn {
           from { transform: translateX(100%); }
           to { transform: translateX(0); }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        .crm-drawer-overlay {
-          transition: all 0.25s ease;
-        }
-        .crm-drawer {
-          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .crm-board-column {
-          transition: all 0.2s ease;
-        }
-        .crm-board-column.drag-over {
-          border-color: var(--primary) !important;
-          background: rgba(0, 188, 125, 0.08) !important;
-          box-shadow: 0 0 15px rgba(0, 188, 125, 0.1) inset;
-        }
-        .crm-board-card {
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        }
-        .crm-board-card:hover {
-          border-color: var(--primary-hover) !important;
-          transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(0, 188, 125, 0.2) !important;
-          background: rgba(22, 22, 22, 0.95) !important;
-        }
-        .crm-board-card:active {
-          cursor: grabbing;
-        }
-        .crm-board-card .card-title-hover {
-          transition: color 0.15s ease;
-        }
-        .crm-board-card:hover .card-title-hover {
-          color: var(--primary) !important;
-        }
-        .timeline-item-row:hover .delete-item-btn {
-          display: block !important;
-        }
-        .timeline-item-row:hover .delete-item-btn:hover {
-          color: rgba(239, 68, 68, 1) !important;
+        @keyframes modalFadeIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>

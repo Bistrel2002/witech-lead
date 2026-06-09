@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDb } from './database/db.js';
+import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
 import { testSmtpConnection, runCampaignBackground } from './services/emailService.js';
 
@@ -20,9 +20,331 @@ export async function eliminateDuplicates(db) {
   return beforeCount.count - afterCount.count;
 }
 
+// Helper for parsing CSV line correctly (respecting quotes, commas, semicolons)
+function parseCsvLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((c === ',' || c === ';') && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += c;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+// Helper to ensure french_businesses table is provisioned
+async function ensureFrenchBusinessesTable(db) {
+  if (db.isPg) {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS french_businesses (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100),
+        city VARCHAR(100),
+        phone VARCHAR(50),
+        email VARCHAR(255),
+        website VARCHAR(255),
+        address TEXT,
+        rating REAL,
+        review_count INTEGER DEFAULT 0
+      )
+    `);
+    await db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_french_biz_cat_city ON french_businesses(category, city);
+    `);
+  } else {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS french_businesses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT,
+        city TEXT,
+        phone TEXT,
+        email TEXT,
+        website TEXT,
+        address TEXT,
+        rating REAL,
+        review_count INTEGER DEFAULT 0
+      )
+    `);
+    await db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_french_biz_cat_city ON french_businesses(category, city);
+    `);
+  }
+}
+
 // ==========================================
 // LEADS ENDPOINTS
 // ==========================================
+
+// French Business Database Lookup
+// French Business Database Lookup (handles GET for raw searches and POST for importing/mapping leads)
+router.all('/leads/french-db-lookup', async (req, res) => {
+  const { category, city, saveToDb, campaignId, limit } = req.method === 'POST' ? req.body : req.query;
+  const lim = parseInt(limit, 10) || 50;
+  try {
+    const fDb = await getFrenchDb();
+    const db = await getDb();
+    
+    // Check if french_businesses table exists
+    let hasTable = true;
+    try {
+      if (fDb.isPg) {
+        const check = await fDb.get(
+          "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'french_businesses')"
+        );
+        hasTable = check.exists;
+      } else {
+        const check = await fDb.get(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='french_businesses'"
+        );
+        hasTable = !!check;
+      }
+    } catch (_) {
+      hasTable = false;
+    }
+
+    if (!hasTable) {
+      return res.json(req.method === 'POST' ? { message: "La base de données nationale est vide.", leads: [] } : []);
+    }
+
+    let query = 'SELECT * FROM french_businesses WHERE 1=1';
+    const params = [];
+
+    if (category) {
+      query += ' AND category ILIKE ?';
+      params.push(`%${category}%`);
+    }
+    if (city) {
+      query += ' AND city ILIKE ?';
+      params.push(`%${city}%`);
+    }
+
+    query += ` LIMIT ${lim}`;
+    
+    if (!fDb.isPg) {
+      query = query.replace(/ILIKE/g, 'LIKE');
+    }
+
+    const businesses = await fDb.all(query, ...params);
+    
+    // If it's a GET request, return raw businesses directly
+    if (req.method === 'GET') {
+      return res.json(businesses);
+    }
+
+    // If POST, process CRM insertion & campaign linking
+    const processedLeads = [];
+    for (const biz of businesses) {
+      let targetLead = await db.get(
+        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?)', 
+        biz.name, biz.category, biz.city || null, biz.website || null
+      );
+
+      // Save to main DB if requested or linking to campaign
+      if (!targetLead && (saveToDb !== false || campaignId)) {
+        const insertRes = await db.run(
+          `INSERT INTO leads (
+            name, category, website, phone, email, google_maps_url, city, notes, status, 
+            rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
+            social_handles, load_time_ms, tech_stack
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          biz.name, biz.category, biz.website, biz.phone, biz.email, biz.google_maps_url, 
+          biz.city, biz.notes || 'Prospect issu de la base nationale.', 'New', biz.rating || null, biz.review_count || 0, biz.address || null,
+          biz.has_ssl || 0, biz.is_mobile_friendly || 0, biz.has_chat_widget || 0,
+          biz.social_handles || '{}', biz.load_time_ms || null, biz.tech_stack || null
+        );
+        targetLead = await db.get('SELECT * FROM leads WHERE id = ?', insertRes.lastID);
+      }
+
+      if (targetLead) {
+        processedLeads.push(targetLead);
+
+        if (campaignId) {
+          const alreadyLinked = await db.get(
+            'SELECT id FROM campaign_logs WHERE campaign_id = ? AND lead_id = ?', 
+            campaignId, targetLead.id
+          );
+          if (!alreadyLinked) {
+            await db.run(
+              'INSERT INTO campaign_logs (campaign_id, lead_id, status) VALUES (?, ?, ?)',
+              campaignId, targetLead.id, 'Pending'
+            );
+            await db.run(
+              'UPDATE campaigns SET total_leads = total_leads + 1 WHERE id = ?',
+              campaignId
+            );
+          }
+        }
+      } else {
+        // If not saving, return the raw business details
+        processedLeads.push(biz);
+      }
+    }
+
+    res.json({
+      message: `Recherche nationale complétée : ${processedLeads.length} prospects identifiés.`,
+      category,
+      city,
+      leads: processedLeads
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stream CSV Importer into French Business Database
+router.post('/leads/french-db-import', async (req, res) => {
+  try {
+    const db = await getFrenchDb();
+    await ensureFrenchBusinessesTable(db);
+
+    let buffer = '';
+    let headers = null;
+    let batch = [];
+    const BATCH_SIZE = 500;
+    let totalImported = 0;
+
+    const flushBatch = async () => {
+      if (batch.length === 0) return;
+      
+      if (db.isPg) {
+        let query = 'INSERT INTO french_businesses (name, category, city, phone, email, website, address, rating, review_count) VALUES ';
+        const values = [];
+        let index = 1;
+        
+        for (const row of batch) {
+          query += `($${index}, $${index+1}, $${index+2}, $${index+3}, $${index+4}, $${index+5}, $${index+6}, $${index+7}, $${index+8}),`;
+          values.push(
+            row.name,
+            row.category || null,
+            row.city || null,
+            row.phone || null,
+            row.email || null,
+            row.website || null,
+            row.address || null,
+            row.rating || null,
+            row.review_count || 0
+          );
+          index += 9;
+        }
+        query = query.slice(0, -1);
+        await db.client.query(query, values);
+      } else {
+        await db.exec('BEGIN TRANSACTION');
+        for (const row of batch) {
+          await db.run(
+            `INSERT INTO french_businesses (name, category, city, phone, email, website, address, rating, review_count) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            row.name, row.category, row.city, row.phone, row.email, row.website, row.address, row.rating, row.review_count
+          );
+        }
+        await db.exec('COMMIT');
+      }
+      
+      totalImported += batch.length;
+      batch = [];
+    };
+
+    req.on('data', async (chunk) => {
+      req.pause();
+      buffer += chunk.toString();
+      let lines = buffer.split(/\r?\n/);
+      buffer = lines.pop();
+
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        const columns = parseCsvLine(line);
+        if (!headers) {
+          headers = columns.map(h => h.toLowerCase());
+          continue;
+        }
+
+        const rowData = {};
+        headers.forEach((h, idx) => {
+          rowData[h] = columns[idx] || '';
+        });
+
+        const name = rowData.name || rowData.nom || rowData.business_name || columns[0];
+        if (!name) continue;
+
+        const category = rowData.category || rowData.catégorie || rowData.sector || rowData.secteur || columns[1] || '';
+        const city = rowData.city || rowData.ville || columns[2] || '';
+        const phone = rowData.phone || rowData.téléphone || rowData.tel || columns[3] || '';
+        const email = rowData.email || columns[4] || '';
+        const website = rowData.website || rowData.site || rowData.site_web || columns[5] || '';
+        const address = rowData.address || rowData.adresse || columns[6] || '';
+        const rating = parseFloat(rowData.rating || rowData.note || columns[7] || 0);
+        const review_count = parseInt(rowData.review_count || rowData.reviews || columns[8] || 0, 10);
+
+        batch.push({ name, category, city, phone, email, website, address, rating, review_count });
+
+        if (batch.length >= BATCH_SIZE) {
+          try {
+            await flushBatch();
+          } catch (err) {
+            console.error('Failed to flush batch:', err);
+          }
+        }
+      }
+      req.resume();
+    });
+
+    req.on('end', async () => {
+      if (buffer.trim()) {
+        const columns = parseCsvLine(buffer.trim());
+        if (headers) {
+          const rowData = {};
+          headers.forEach((h, idx) => {
+            rowData[h] = columns[idx] || '';
+          });
+          const name = rowData.name || rowData.nom || columns[0];
+          if (name) {
+            const category = rowData.category || rowData.catégorie || columns[1] || '';
+            const city = rowData.city || rowData.ville || columns[2] || '';
+            const phone = rowData.phone || rowData.téléphone || columns[3] || '';
+            const email = rowData.email || columns[4] || '';
+            const website = rowData.website || rowData.site || columns[5] || '';
+            const address = rowData.address || rowData.adresse || columns[6] || '';
+            const rating = parseFloat(rowData.rating || 0);
+            const review_count = parseInt(rowData.review_count || 0, 10);
+            batch.push({ name, category, city, phone, email, website, address, rating, review_count });
+          }
+        }
+      }
+
+      try {
+        await flushBatch();
+        res.json({ success: true, count: totalImported, message: `${totalImported} établissements importés avec succès.` });
+      } catch (err) {
+        res.status(500).json({ error: 'Erreur lors de la finalisation: ' + err.message });
+      }
+    });
+
+    req.on('error', (err) => {
+      res.status(500).json({ error: 'Erreur de flux: ' + err.message });
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Get all leads
 router.get('/leads', async (req, res) => {
@@ -339,42 +661,82 @@ router.post('/leads/import', async (req, res) => {
 
 // Scrape and import from Google Maps Link directly, filtering out non-website and categorizing
 router.post('/leads/scrape-maps-link', async (req, res) => {
-  const { mapsUrl } = req.body;
+  const { mapsUrl, category, city, radius, saveToDb, campaignId } = req.body;
   if (!mapsUrl) {
     return res.status(400).json({ error: 'Un lien Google Maps est requis' });
   }
 
   try {
     const db = await getDb();
-    const { category, city, leads } = await scrapeGoogleMapsFromLink(mapsUrl);
+    const result = await scrapeGoogleMapsFromLink(mapsUrl, category, city, radius);
+    const finalCategory = result.category;
+    const finalCity = result.city;
+    const leads = result.leads;
 
     if (leads.length === 0) {
       return res.status(400).json({ error: "Aucun établissement n'a été trouvé dans cette zone." });
     }
 
-    const insertedLeads = [];
+    const processedLeads = [];
     for (const lead of leads) {
-      // Direct duplicate check to avoid inserting duplicates if they run multiple times
-      const existing = await db.get('SELECT id FROM leads WHERE name = ? AND category = ? AND city = ?', lead.name, lead.category, lead.city);
-      if (existing) continue;
-
-      const result = await db.run(
-        `INSERT INTO leads (name, category, website, phone, email, google_maps_url, city, notes, status, rating, review_count, address) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        lead.name, lead.category, lead.website, lead.phone, lead.email, lead.google_maps_url, lead.city, lead.notes, 'New', lead.rating || null, lead.review_count || 0, lead.address || null
+      // 1. Check duplicate in local CRM db
+      let targetLead = await db.get(
+        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?)', 
+        lead.name, lead.category, lead.city || null, lead.website || null
       );
-      const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
-      insertedLeads.push(newLead);
+
+      // 2. Insert to DB if requested or if it doesn't exist and we need to link it to a campaign
+      if (!targetLead && (saveToDb !== false || campaignId)) {
+        const insertRes = await db.run(
+          `INSERT INTO leads (
+            name, category, website, phone, email, google_maps_url, city, notes, status, 
+            rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
+            social_handles, load_time_ms, tech_stack
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          lead.name, lead.category, lead.website, lead.phone, lead.email, lead.google_maps_url, 
+          lead.city, lead.notes, 'New', lead.rating || null, lead.review_count || 0, lead.address || null,
+          lead.has_ssl || 0, lead.is_mobile_friendly || 0, lead.has_chat_widget || 0,
+          lead.social_handles || '{}', lead.load_time_ms || null, lead.tech_stack || null
+        );
+        targetLead = await db.get('SELECT * FROM leads WHERE id = ?', insertRes.lastID);
+      }
+
+      if (targetLead) {
+        processedLeads.push(targetLead);
+
+        // 3. Add to Campaign if requested
+        if (campaignId) {
+          // Check if already in campaign
+          const alreadyLinked = await db.get(
+            'SELECT id FROM campaign_logs WHERE campaign_id = ? AND lead_id = ?', 
+            campaignId, targetLead.id
+          );
+          if (!alreadyLinked) {
+            await db.run(
+              'INSERT INTO campaign_logs (campaign_id, lead_id, status) VALUES (?, ?, ?)',
+              campaignId, targetLead.id, 'Pending'
+            );
+            // Increment total leads in campaign
+            await db.run(
+              'UPDATE campaigns SET total_leads = total_leads + 1 WHERE id = ?',
+              campaignId
+            );
+          }
+        }
+      } else {
+        // If not saving to DB and not linking, return raw listing
+        processedLeads.push(lead);
+      }
     }
 
     // Trigger automatic database deduplication cleanup to ensure zero duplicates exist
     await eliminateDuplicates(db);
 
     res.status(201).json({
-      message: `Scraping réussi : ${insertedLeads.length} prospects importés dans la catégorie "${category}"`,
-      category,
-      city,
-      leads: insertedLeads
+      message: `Scraping réussi : ${processedLeads.length} prospects traités dans la catégorie "${finalCategory}"`,
+      category: finalCategory,
+      city: finalCity,
+      leads: processedLeads
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -536,7 +898,7 @@ router.get('/campaigns', async (req, res) => {
 
 // Create campaign and queue leads
 router.post('/campaigns', async (req, res) => {
-  const { name, template_id, category, lead_ids } = req.body;
+  const { name, template_id, category, lead_ids, channel } = req.body;
   if (!name || !template_id) {
     return res.status(400).json({ error: 'Campaign name and template_id are required' });
   }
@@ -563,8 +925,8 @@ router.post('/campaigns', async (req, res) => {
 
     // Insert Campaign
     const result = await db.run(
-      'INSERT INTO campaigns (name, template_id, total_leads) VALUES (?, ?, ?)',
-      name, template_id, targets.length
+      'INSERT INTO campaigns (name, template_id, total_leads, channel) VALUES (?, ?, ?, ?)',
+      name, template_id, targets.length, channel || 'email'
     );
     const campaignId = result.lastID;
 

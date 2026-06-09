@@ -11,11 +11,12 @@ import {
   Users, 
   Eye, 
   Trash2, 
-  Sparkles,
-  ChevronRight,
   RefreshCw,
+  ChevronRight,
   ExternalLink,
-  Edit2
+  Edit2,
+  MessageSquare,
+  Smartphone
 } from 'lucide-react';
 
 export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
@@ -29,7 +30,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
   const [templateForm, setTemplateForm] = useState({ name: '', subject: '', body: '' });
   
   // New Campaign wizard state
-  const [newCampaign, setNewCampaign] = useState({ name: '', template_id: '', category: '' });
+  const [newCampaign, setNewCampaign] = useState({ name: '', template_id: '', category: '', channel: 'email' });
   const [campaignPreviewLeads, setCampaignPreviewLeads] = useState([]);
   const [selectedPreviewLeadIdx, setSelectedPreviewLeadIdx] = useState(0);
   
@@ -116,23 +117,37 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
     return compiled;
   };
 
-  // Unique categories matching prospects with emails
-  const uniqueCategoriesWithEmails = [...new Set(
-    leads.filter(l => l.email && l.email.trim() !== '').map(l => l.category)
+  // Filter categories depending on selected channel
+  const uniqueCategoriesWithContacts = [...new Set(
+    leads
+      .filter(l => {
+        if (newCampaign.channel === 'email') {
+          return l.email && l.email.trim() !== '';
+        } else {
+          // SMS or WhatsApp require a valid phone number
+          return l.phone && l.phone.trim() !== '';
+        }
+      })
+      .map(l => l.category)
   )];
 
-  // Update target leads preview when category changes in wizard
+  // Update target leads preview when category or channel changes in wizard
   useEffect(() => {
     if (newCampaign.category) {
-      const targets = leads.filter(
-        l => l.category === newCampaign.category && l.email && l.email.trim() !== ''
-      );
+      const targets = leads.filter(l => {
+        const hasCategory = l.category === newCampaign.category;
+        if (newCampaign.channel === 'email') {
+          return hasCategory && l.email && l.email.trim() !== '';
+        } else {
+          return hasCategory && l.phone && l.phone.trim() !== '';
+        }
+      });
       setCampaignPreviewLeads(targets);
       setSelectedPreviewLeadIdx(0);
     } else {
       setCampaignPreviewLeads([]);
     }
-  }, [newCampaign.category, leads]);
+  }, [newCampaign.category, newCampaign.channel, leads]);
 
   // Handle Template Crud
   const handleTemplateSubmit = async (e) => {
@@ -191,14 +206,15 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
         body: JSON.stringify({
           name: newCampaign.name,
           template_id: parseInt(newCampaign.template_id),
-          category: newCampaign.category
+          category: newCampaign.category,
+          channel: newCampaign.channel
         })
       });
 
       if (res.ok) {
         const campaign = await res.json();
         
-        // Auto-trigger background SMTP send
+        // Auto-trigger background delivery send
         await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST' });
         
         await loadCampaigns();
@@ -207,7 +223,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
         viewCampaignDetails(campaign.id);
         
         // Reset wizard
-        setNewCampaign({ name: '', template_id: '', category: '' });
+        setNewCampaign({ name: '', template_id: '', category: '', channel: 'email' });
       } else {
         const data = await res.json();
         alert(data.error || 'Erreur lors de la création de la campagne');
@@ -268,94 +284,106 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
     return `mailto:${lead.email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
   };
 
+  // SMS / WhatsApp Link Generator
+  const getMessageLink = (lead, template, type) => {
+    if (!lead || !template) return '#';
+    const compiledBody = compileClientDraft(template.body, lead);
+    const cleanPhone = lead.phone ? lead.phone.replace(/[\s\-\(\)]/g, '') : '';
+    if (type === 'whatsapp') {
+      return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(compiledBody)}`;
+    }
+    return `sms:${cleanPhone}?body=${encodeURIComponent(compiledBody)}`;
+  };
+
   const handleCopyClipboard = (lead, template) => {
     const compiledBody = compileClientDraft(template.body, lead);
     navigator.clipboard.writeText(compiledBody);
-    alert('📧 Message copié dans le presse-papier !');
+    alert('📝 Message copié dans le presse-papier !');
   };
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex-between mb-20">
-        <div>
-          <h2>Campagnes d'Outreach</h2>
-          <p style={{ color: '#a3a3a3', fontSize: '14px', marginTop: '4px' }}>
-            Configurez vos modèles d'emails et lancez des campagnes groupées intelligentes.
-          </p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-heading font-extrabold text-slate-800">Campagnes d'Outreach</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          Configurez vos modèles et lancez des campagnes automatisées par Email, SMS ou WhatsApp.
+        </p>
       </div>
 
       {/* Mini Tabs */}
-      <div className="tab-container">
+      <div className="flex gap-1 bg-slate-200/60 p-1 rounded-xl border border-slate-200/80 max-w-2xl">
         <button 
-          className={`tab-btn ${activeTab === 'templates' ? 'active' : ''}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'templates' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           onClick={() => setActiveTab('templates')}
         >
-          Modèles d'Emails
+          Modèles de Prospection
         </button>
         <button 
-          className={`tab-btn ${activeTab === 'new-campaign' ? 'active' : ''}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'new-campaign' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           onClick={() => setActiveTab('new-campaign')}
         >
-          Nouvelle Campagne (wizard)
+          Créateur de Campagne
         </button>
         <button 
-          className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'history' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           onClick={() => setActiveTab('history')}
         >
           Historique & Rapports
         </button>
         {selectedCampaignDetails && (
           <button 
-            className={`tab-btn ${activeTab === 'active-monitor' ? 'active' : ''}`}
+            className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'active-monitor' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             onClick={() => setActiveTab('active-monitor')}
           >
-            Suivi Campagne : {selectedCampaignDetails.campaign.name}
+            Suivi : {selectedCampaignDetails.campaign.name}
           </button>
         )}
       </div>
 
       {/* TAB 1: TEMPLATES */}
       {activeTab === 'templates' && (
-        <div>
-          <div className="flex-between mb-20">
-            <h3>Vos Modèles de Prospection</h3>
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg">Modèles Disponibles</h3>
             {!showTemplateForm && (
-              <button className="btn btn-primary btn-sm" onClick={() => { setShowTemplateForm(true); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '' }); }}>
-                <Plus style={{ width: '14px' }} />
+              <button 
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150" 
+                onClick={() => { setShowTemplateForm(true); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '' }); }}
+              >
+                <Plus className="w-4 h-4" />
                 Nouveau Modèle
               </button>
             )}
           </div>
 
           {showTemplateForm && (
-            <div className="glass-panel mb-20" style={{ padding: '24px' }}>
-              <h4>{editingTemplate ? 'Modifier le modèle' : 'Créer un nouveau modèle'}</h4>
-              <form onSubmit={handleTemplateSubmit} style={{ marginTop: '16px' }}>
-                <div className="form-group">
-                  <label className="form-label">Nom du Modèle *</label>
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+              <h4 className="font-heading font-extrabold text-slate-800 text-base">{editingTemplate ? 'Modifier le modèle' : 'Créer un nouveau modèle'}</h4>
+              <form onSubmit={handleTemplateSubmit} className="space-y-4 mt-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom du Modèle *</label>
                   <input 
-                    type="text" className="form-control" required
+                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                     value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
-                    placeholder="Ex: Witech - Web Design Plombiers"
+                    placeholder="Ex: Witech - Pitch n8n Artisans"
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Sujet de l'Email *</label>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Objet (Email seulement)</label>
                   <input 
-                    type="text" className="form-control" required
+                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
                     value={templateForm.subject} onChange={(e) => setTemplateForm({ ...templateForm, subject: e.target.value })}
-                    placeholder="Ex: Amélioration de la visibilité en ligne de {{company_name}}"
+                    placeholder="Ex: Optimisation de la visibilité en ligne de {{company_name}}"
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Contenu de l'Email *</label>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Corps du Message *</label>
+                  <div className="flex flex-wrap gap-2 mb-2">
                     {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_signature'].map(tag => (
                       <span 
                         key={tag} 
-                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px', padding: '2px 8px', fontSize: '11px', color: '#87D6C2', cursor: 'pointer' }}
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg px-2 py-1 text-2xs text-teal-700 font-mono cursor-pointer transition-colors"
                         onClick={() => setTemplateForm({ ...templateForm, body: templateForm.body + ` {{${tag}}}` })}
                       >
                         +{tag}
@@ -363,41 +391,46 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                     ))}
                   </div>
                   <textarea 
-                    className="form-control" required
-                    style={{ minHeight: '200px', fontFamily: 'monospace', fontSize: '13px' }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[160px] font-mono" required
                     value={templateForm.body} onChange={(e) => setTemplateForm({ ...templateForm, body: e.target.value })}
-                    placeholder="Ecrivez votre email ici..."
+                    placeholder="Saisissez votre message. Utilisez les tags ci-dessus pour insérer des variables dynamiques..."
                   />
                 </div>
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowTemplateForm(false)}>Annuler</button>
-                  <button type="submit" className="btn btn-primary">Sauvegarder le Modèle</button>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150" onClick={() => setShowTemplateForm(false)}>Annuler</button>
+                  <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150">Sauvegarder</button>
                 </div>
               </form>
             </div>
           )}
 
-          <div className="row">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {templates.map(tmpl => (
-              <div key={tmpl.id} className="col col-6">
-                <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <div className="flex-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', marginBottom: '12px' }}>
-                    <h4 style={{ fontSize: '15px' }}>{tmpl.name}</h4>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button className="btn btn-secondary btn-sm" style={{ padding: '4px' }} onClick={() => handleEditTemplate(tmpl)}>
-                        <Edit2 style={{ width: '12px' }} />
+              <div key={tmpl.id} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                    <h4 className="font-heading font-extrabold text-slate-800 text-base">{tmpl.name}</h4>
+                    <div className="flex gap-2">
+                      <button className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 transition-colors" onClick={() => handleEditTemplate(tmpl)}>
+                        <Edit2 className="w-4 h-4" />
                       </button>
-                      <button className="btn btn-secondary btn-sm" style={{ padding: '4px' }} onClick={() => handleDeleteTemplate(tmpl.id)}>
-                        <Trash2 style={{ width: '12px', color: '#ef4444' }} />
+                      <button className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors" onClick={() => handleDeleteTemplate(tmpl.id)}>
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Sujet :</p>
-                  <p style={{ fontSize: '13px', color: '#fff', fontWeight: 500, marginBottom: '12px' }}>{tmpl.subject}</p>
-                  <p style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Aperçu du corps :</p>
-                  <p style={{ fontSize: '12px', color: '#a3a3a3', whiteSpace: 'pre-wrap', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
-                    {tmpl.body}
-                  </p>
+                  {tmpl.subject && (
+                    <div className="mb-3">
+                      <p className="text-2xs font-bold text-slate-400 uppercase tracking-wider mb-1">Sujet (Email) :</p>
+                      <p className="text-sm text-slate-700 font-semibold">{tmpl.subject}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-2xs font-bold text-slate-400 uppercase tracking-wider mb-1">Message :</p>
+                    <p className="text-xs text-slate-500 whiteSpace-pre-wrap font-mono line-clamp-4 leading-relaxed">
+                      {tmpl.body}
+                    </p>
+                  </div>
                 </div>
               </div>
             ))}
@@ -407,94 +440,135 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
 
       {/* TAB 2: NEW CAMPAIGN WIZARD */}
       {activeTab === 'new-campaign' && (
-        <div className="row">
-          <div className="col col-6">
-            <div className="glass-panel">
-              <h3 style={{ marginBottom: '16px' }}>Créer une Nouvelle Campagne</h3>
-              <form onSubmit={handleCreateCampaign}>
-                <div className="form-group">
-                  <label className="form-label">Nom de la Campagne *</label>
-                  <input 
-                    type="text" className="form-control" required
-                    value={newCampaign.name} onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
-                    placeholder="Ex: Campagne Plombiers Paris n8n"
-                  />
-                </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-5">Paramétrer la Campagne</h3>
+            <form onSubmit={handleCreateCampaign} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de la Campagne *</label>
+                <input 
+                  type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  value={newCampaign.name} onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
+                  placeholder="Ex: Campagne Plombiers Nantes SMS"
+                />
+              </div>
 
-                <div className="form-group">
-                  <label className="form-label">Choisir un Modèle d'Email *</label>
-                  <select 
-                    className="form-control" required
-                    value={newCampaign.template_id} onChange={(e) => setNewCampaign({ ...newCampaign, template_id: e.target.value })}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Canal de Prospection *</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'email' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'email', category: '' })}
                   >
-                    <option value="">-- Sélectionnez un modèle --</option>
-                    {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Sélectionner la Catégorie cible *</label>
-                  <select 
-                    className="form-control" required
-                    value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
+                    <Mail className="w-5 h-5 mb-1.5" />
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'sms' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'sms', category: '' })}
                   >
-                    <option value="">-- Sélectionnez une catégorie --</option>
-                    {uniqueCategoriesWithEmails.map(c => (
-                      <option key={c} value={c}>{c} ({leads.filter(l => l.category === c && l.email && l.email.trim() !== '').length} emails qualifiés)</option>
-                    ))}
-                  </select>
+                    <Smartphone className="w-5 h-5 mb-1.5" />
+                    SMS
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'whatsapp' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'whatsapp', category: '' })}
+                  >
+                    <MessageSquare className="w-5 h-5 mb-1.5" />
+                    WhatsApp
+                  </button>
                 </div>
+              </div>
 
-                <div style={{ background: 'rgba(0,188,125,0.03)', border: '1px solid rgba(0,188,125,0.1)', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
-                  <h5 style={{ fontSize: '13px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Send style={{ width: '14px', color: '#00BC7D' }} />
-                    Envoi Automatisé via SMTP
-                  </h5>
-                  <p style={{ fontSize: '11px', color: '#a3a3a3', marginTop: '4px' }}>
-                    Les messages seront envoyés séquentiellement en arrière-plan avec un délai de 5 secondes pour préserver la réputation de votre adresse mail.
-                  </p>
-                </div>
-
-                <button 
-                  type="submit" 
-                  className="btn btn-primary" 
-                  style={{ width: '100%' }}
-                  disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Modèle de Message *</label>
+                <select 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  value={newCampaign.template_id} onChange={(e) => setNewCampaign({ ...newCampaign, template_id: e.target.value })}
                 >
-                  Démarrer la Campagne ({campaignPreviewLeads.length} cibles)
-                </button>
-              </form>
-            </div>
+                  <option value="">-- Sélectionnez un modèle --</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible *</label>
+                <select 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
+                >
+                  <option value="">-- Sélectionnez une catégorie --</option>
+                  {uniqueCategoriesWithContacts.map(c => {
+                    const count = leads.filter(l => {
+                      const hasCat = l.category === c;
+                      if (newCampaign.channel === 'email') {
+                        return hasCat && l.email && l.email.trim() !== '';
+                      } else {
+                        return hasCat && l.phone && l.phone.trim() !== '';
+                      }
+                    }).length;
+                    return (
+                      <option key={c} value={c}>
+                        {c} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'} qualifiés)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div className="bg-teal-50/50 border border-teal-100 rounded-xl p-4 space-y-1">
+                <h5 className="text-xs font-bold text-teal-800 flex items-center gap-1.5">
+                  <Send className="w-3.5 h-3.5" />
+                  Prospection groupée intelligente
+                </h5>
+                <p className="text-slate-500 text-[11px] leading-normal">
+                  {newCampaign.channel === 'email' 
+                    ? "Les e-mails seront envoyés automatiquement via votre connexion SMTP avec une temporisation d'envoi pour protéger votre domaine."
+                    : "Les messages mobiles (SMS/WhatsApp) seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
+                </p>
+              </div>
+
+              <button 
+                type="submit" 
+                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id}
+              >
+                Lancer la Campagne ({campaignPreviewLeads.length} cibles)
+              </button>
+            </form>
           </div>
 
-          <div className="col col-6">
-            <div className="glass-panel" style={{ height: '100%', minHeight: '440px', display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Eye style={{ width: '18px', color: '#87D6C2' }} />
-                Aperçu des Drafts Clients
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[440px] flex flex-col justify-between">
+            <div>
+              <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center gap-2">
+                <Eye className="w-5 h-5 text-teal-600" />
+                Aperçu du Draft Client
               </h3>
 
               {campaignPreviewLeads.length === 0 || !newCampaign.template_id ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#666', padding: '40px 0' }}>
-                  <Users style={{ width: '48px', height: '48px', opacity: 0.3, marginBottom: '12px' }} />
-                  <p style={{ fontSize: '13px' }}>Sélectionnez un modèle et une catégorie pour générer les aperçus.</p>
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                  <Users className="w-12 h-12 opacity-30 mb-3" />
+                  <p className="text-xs text-center max-w-[240px]">Sélectionnez un canal, un modèle et une catégorie pour simuler les messages.</p>
                 </div>
               ) : (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <div className="flex-between" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px' }}>
-                    <span style={{ fontSize: '13px', color: '#a3a3a3' }}>Cible {selectedPreviewLeadIdx + 1} sur {campaignPreviewLeads.length}</span>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+                    <span className="text-xs text-slate-500 font-semibold">Destinataire {selectedPreviewLeadIdx + 1} sur {campaignPreviewLeads.length}</span>
+                    <div className="flex gap-1.5">
                       <button 
-                        className="tab-btn" style={{ padding: '2px 8px', fontSize: '11px' }}
+                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
                         disabled={selectedPreviewLeadIdx === 0}
                         onClick={() => setSelectedPreviewLeadIdx(selectedPreviewLeadIdx - 1)}
                       >
                         Précédent
                       </button>
                       <button 
-                        className="tab-btn" style={{ padding: '2px 8px', fontSize: '11px' }}
+                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
                         disabled={selectedPreviewLeadIdx === campaignPreviewLeads.length - 1}
                         onClick={() => setSelectedPreviewLeadIdx(selectedPreviewLeadIdx + 1)}
                       >
@@ -503,42 +577,43 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                     </div>
                   </div>
 
-                  {/* Mail header preview */}
-                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', marginBottom: '12px' }}>
-                    <p style={{ fontSize: '12px', color: '#666' }}>À: <strong style={{ color: '#00BC7D' }}>{campaignPreviewLeads[selectedPreviewLeadIdx].email}</strong> ({campaignPreviewLeads[selectedPreviewLeadIdx].name})</p>
-                    <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>Objet: <strong style={{ color: '#fff' }}>
-                      {compileClientDraft(
-                        templates.find(t => t.id === parseInt(newCampaign.template_id))?.subject,
-                        campaignPreviewLeads[selectedPreviewLeadIdx]
-                      )}
-                    </strong></p>
+                  {/* Message header preview */}
+                  <div className="pb-3 border-b border-slate-100 space-y-1">
+                    <p className="text-xs text-slate-500">
+                      Canal : <span className="font-bold text-slate-700 uppercase">{newCampaign.channel}</span>
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Destinataire : <strong className="text-teal-700">
+                        {newCampaign.channel === 'email' 
+                          ? campaignPreviewLeads[selectedPreviewLeadIdx].email 
+                          : campaignPreviewLeads[selectedPreviewLeadIdx].phone || 'Non renseigné'}
+                      </strong> ({campaignPreviewLeads[selectedPreviewLeadIdx].name})
+                    </p>
+                    {newCampaign.channel === 'email' && (
+                      <p className="text-xs text-slate-500">
+                        Objet : <strong className="text-slate-800">
+                          {compileClientDraft(
+                            templates.find(t => t.id === parseInt(newCampaign.template_id))?.subject,
+                            campaignPreviewLeads[selectedPreviewLeadIdx]
+                          )}
+                        </strong>
+                      </p>
+                    )}
                   </div>
 
-                  {/* Mail body preview */}
-                  <div style={{ 
-                    flex: 1, 
-                    background: 'rgba(0,0,0,0.4)', 
-                    border: '1px solid rgba(255,255,255,0.04)', 
-                    borderRadius: '10px', 
-                    padding: '16px', 
-                    fontSize: '13px', 
-                    color: '#e5e7eb', 
-                    whiteSpace: 'pre-wrap', 
-                    fontFamily: 'monospace',
-                    overflowY: 'auto',
-                    maxHeight: '280px'
-                  }}>
+                  {/* Message body preview */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 font-mono whiteSpace-pre-wrap overflow-y-auto max-h-[200px]">
                     {compileClientDraft(
                       templates.find(t => t.id === parseInt(newCampaign.template_id))?.body,
                       campaignPreviewLeads[selectedPreviewLeadIdx]
                     )}
                   </div>
                   
-                  {/* Manual mailto action queue helper */}
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  {/* Action triggers */}
+                  <div className="flex gap-3 pt-2">
                     <button 
                       type="button" 
-                      className="btn btn-secondary btn-sm" style={{ flex: 1 }}
+                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150"
                       onClick={() => handleCopyClipboard(
                         campaignPreviewLeads[selectedPreviewLeadIdx],
                         templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -546,16 +621,30 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                     >
                       Copier le corps
                     </button>
-                    <a 
-                      href={getMailtoLink(
-                        campaignPreviewLeads[selectedPreviewLeadIdx],
-                        templates.find(t => t.id === parseInt(newCampaign.template_id))
-                      )}
-                      className="btn btn-primary btn-sm" style={{ flex: 1 }}
-                    >
-                      Ouvrir Mail Client
-                      <ExternalLink style={{ width: '12px' }} />
-                    </a>
+                    {newCampaign.channel === 'email' ? (
+                      <a 
+                        href={getMailtoLink(
+                          campaignPreviewLeads[selectedPreviewLeadIdx],
+                          templates.find(t => t.id === parseInt(newCampaign.template_id))
+                        )}
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
+                      >
+                        Ouvrir le client Mail
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    ) : (
+                      <a 
+                        href={getMessageLink(
+                          campaignPreviewLeads[selectedPreviewLeadIdx],
+                          templates.find(t => t.id === parseInt(newCampaign.template_id)),
+                          newCampaign.channel
+                        )}
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
+                      >
+                        {newCampaign.channel === 'whatsapp' ? 'Ouvrir WhatsApp' : 'Ouvrir SMS'}
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                   </div>
                 </div>
               )}
@@ -566,52 +655,58 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
 
       {/* TAB 3: CAMPAIGNS HISTORY LIST */}
       {activeTab === 'history' && (
-        <div className="glass-panel">
-          <h3 style={{ marginBottom: '16px' }}>Historique de vos Campagnes</h3>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Historique des Campagnes</h3>
           
           {campaigns.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: '#666' }}>
-              <Clock style={{ width: '48px', height: '48px', margin: '0 auto 12px auto', opacity: 0.3 }} />
-              <h4>Aucune campagne lancée</h4>
-              <p style={{ fontSize: '13px', marginTop: '4px' }}>Vous pourrez suivre vos outreachs automatisés ici.</p>
+            <div className="text-center py-16 text-slate-400">
+              <Clock className="w-12 h-12 mx-auto mb-3 opacity-30 text-teal-600" />
+              <h4 className="font-heading font-bold text-slate-700">Aucune campagne lancée</h4>
+              <p className="text-xs mt-1">Vous pourrez suivre vos outreachs automatisés ici.</p>
             </div>
           ) : (
-            <div className="table-container" style={{ marginTop: '0' }}>
-              <table className="custom-table">
+            <div className="overflow-x-auto border border-slate-100 rounded-xl">
+              <table className="w-full border-collapse text-left text-sm">
                 <thead>
-                  <tr>
-                    <th>Nom de la Campagne</th>
-                    <th>Modèle</th>
-                    <th>Cibles</th>
-                    <th>Envoyés</th>
-                    <th>Échecs</th>
-                    <th>Date de Lancement</th>
-                    <th>Statut</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold text-xs uppercase tracking-wider">
+                    <th className="p-4">Nom de la Campagne</th>
+                    <th className="p-4">Canal</th>
+                    <th className="p-4">Modèle</th>
+                    <th className="p-4">Cibles</th>
+                    <th className="p-4">Envoyés</th>
+                    <th className="p-4">Échecs</th>
+                    <th className="p-4">Date de Lancement</th>
+                    <th className="p-4">Statut</th>
+                    <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
                   {campaigns.map(camp => (
-                    <tr key={camp.id}>
-                      <td><strong style={{ color: '#fff' }}>{camp.name}</strong></td>
-                      <td><span style={{ fontSize: '13px', color: '#a3a3a3' }}>{camp.template_name}</span></td>
-                      <td><strong style={{ color: '#fff' }}>{camp.total_leads}</strong></td>
-                      <td><span style={{ color: '#00BC7D', fontWeight: 600 }}>{camp.sent_count}</span></td>
-                      <td><span style={{ color: camp.failed_count > 0 ? '#ef4444' : '#666' }}>{camp.failed_count}</span></td>
-                      <td><span style={{ fontSize: '12px', color: '#666' }}>{new Date(camp.created_at).toLocaleDateString()}</span></td>
-                      <td>
-                        <span className={`badge ${
-                          camp.status === 'Completed' ? 'badge-replied' : 
-                          camp.status === 'Active' ? 'badge-contacting' : 
-                          camp.status === 'Paused' ? 'badge-warm' : 'badge-new'
+                    <tr key={camp.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-bold text-slate-800">{camp.name}</td>
+                      <td className="p-4 text-xs font-semibold capitalize text-slate-600">{camp.channel || 'email'}</td>
+                      <td className="p-4 text-slate-500">{camp.template_name}</td>
+                      <td className="p-4 font-bold text-slate-800">{camp.total_leads}</td>
+                      <td className="p-4 font-semibold text-emerald-600">{camp.sent_count}</td>
+                      <td className={`p-4 font-semibold ${camp.failed_count > 0 ? 'text-red-500' : 'text-slate-400'}`}>{camp.failed_count}</td>
+                      <td className="p-4 text-xs text-slate-400">{new Date(camp.created_at).toLocaleDateString()}</td>
+                      <td className="p-4">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-bold uppercase tracking-wider ${
+                          camp.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
+                          camp.status === 'Active' ? 'bg-teal-50 text-teal-700 border border-teal-100' : 
+                          camp.status === 'Paused' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
+                          'bg-slate-100 text-slate-600 border border-slate-200'
                         }`}>
                           {camp.status}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => viewCampaignDetails(camp.id)}>
+                      <td className="p-4 text-right">
+                        <button 
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs transition-colors" 
+                          onClick={() => viewCampaignDetails(camp.id)}
+                        >
                           Suivi
-                          <ChevronRight style={{ width: '12px' }} />
+                          <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>
@@ -625,52 +720,55 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
 
       {/* TAB 4: ACTIVE MONITOR */}
       {activeTab === 'active-monitor' && selectedCampaignDetails && (
-        <div className="row">
-          <div className="col col-4">
-            <div className="glass-panel" style={{ height: '100%' }}>
-              <h3 style={{ marginBottom: '16px' }}>Status de la Campagne</h3>
-              
-              <div style={{ marginBottom: '20px' }}>
-                <span style={{ fontSize: '11px', color: '#666', display: 'block', textTransform: 'uppercase' }}>Nom</span>
-                <strong style={{ color: '#fff', fontSize: '15px' }}>{selectedCampaignDetails.campaign.name}</strong>
-              </div>
-              
-              <div style={{ marginBottom: '20px' }}>
-                <span style={{ fontSize: '11px', color: '#666', display: 'block', textTransform: 'uppercase' }}>Gabarit d'email</span>
-                <span style={{ color: '#a3a3a3', fontSize: '14px' }}>{selectedCampaignDetails.campaign.template_name}</span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-5">Statut de la Campagne</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Nom</span>
+                <strong className="text-slate-800 text-sm font-bold">{selectedCampaignDetails.campaign.name}</strong>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <span style={{ fontSize: '11px', color: '#666', display: 'block', textTransform: 'uppercase' }}>Progression</span>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', margin: '4px 0', color: '#fff' }}>
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Canal</span>
+                <span className="text-slate-600 text-xs font-semibold capitalize">{selectedCampaignDetails.campaign.channel || 'email'}</span>
+              </div>
+              
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Gabarit de Message</span>
+                <span className="text-slate-600 text-xs">{selectedCampaignDetails.campaign.template_name}</span>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Progression</span>
+                <div className="flex justify-between text-xs font-semibold text-slate-700 mt-1 mb-2">
                   <span>{selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count} / {selectedCampaignDetails.campaign.total_leads} cibles</span>
                   <span>{Math.round(((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100)}%</span>
                 </div>
-                {/* Progress bar container */}
-                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
-                  <div style={{ 
-                    height: '100%', 
-                    background: 'var(--primary)', 
-                    width: `${((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100}%`,
-                    transition: 'width 0.3s ease'
-                  }}></div>
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-teal-600 rounded-full transition-all duration-300"
+                    style={{ width: `${((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100}%` }}
+                  ></div>
                 </div>
               </div>
 
               {/* Status Actions */}
-              <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
+              <div className="flex gap-2 pt-4 border-t border-slate-100">
                 {selectedCampaignDetails.campaign.status === 'Active' ? (
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => handlePauseCampaign(selectedCampaignDetails.campaign.id)}>
-                    <Pause style={{ width: '12px' }} />
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors" onClick={() => handlePauseCampaign(selectedCampaignDetails.campaign.id)}>
+                    <Pause className="w-3.5 h-3.5" />
                     Pause
                   </button>
                 ) : ['Paused', 'Pending'].includes(selectedCampaignDetails.campaign.status) ? (
-                  <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => handleResumeCampaign(selectedCampaignDetails.campaign.id)}>
-                    <Play style={{ width: '12px' }} />
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 transition-colors" onClick={() => handleResumeCampaign(selectedCampaignDetails.campaign.id)}>
+                    <Play className="w-3.5 h-3.5" />
                     Reprendre
                   </button>
                 ) : (
-                  <button className="btn btn-secondary btn-sm btn-disabled" style={{ flex: 1 }} disabled>
+                  <button className="flex-grow inline-flex items-center justify-center px-3 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-400 font-semibold text-xs cursor-not-allowed" disabled>
                     Campagne Terminée
                   </button>
                 )}
@@ -678,54 +776,58 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
             </div>
           </div>
 
-          <div className="col col-8">
-            <div className="glass-panel" style={{ height: '100%' }}>
-              <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyBreak: 'space-between', gap: '8px' }}>
-                Rapports de distribution en temps réel
-                {selectedCampaignDetails.campaign.status === 'Active' && (
-                  <RefreshCw style={{ width: '14px', color: '#00BC7D', animation: 'spin 1s linear infinite' }} />
-                )}
-              </h3>
-              
-              <div className="table-container" style={{ marginTop: '0', maxHeight: '320px', overflowY: 'auto' }}>
-                <table className="custom-table" style={{ fontSize: '13px' }}>
-                  <thead>
-                    <tr>
-                      <th>Prospect</th>
-                      <th>Email</th>
-                      <th>Date</th>
-                      <th>Status</th>
+          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center justify-between">
+              Rapports de distribution en temps réel
+              {selectedCampaignDetails.campaign.status === 'Active' && (
+                <RefreshCw className="w-4 h-4 text-teal-600 animate-spin" />
+              )}
+            </h3>
+            
+            <div className="overflow-x-auto border border-slate-100 rounded-xl max-h-[360px] overflow-y-auto">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase tracking-wider">
+                    <th className="p-3">Prospect</th>
+                    <th className="p-3">Coordonnées</th>
+                    <th className="p-3">Heure</th>
+                    <th className="p-3">Statut</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {selectedCampaignDetails.logs.map(log => (
+                    <tr key={log.id} className="hover:bg-slate-50/30 transition-colors">
+                      <td className="p-3 font-bold text-slate-800">{log.lead_name}</td>
+                      <td className="p-3 text-slate-500">
+                        {selectedCampaignDetails.campaign.channel === 'email' 
+                          ? log.lead_email || '—' 
+                          : log.lead_phone || '—'}
+                      </td>
+                      <td className="p-3 text-slate-400">
+                        {log.sent_at ? new Date(log.sent_at).toLocaleTimeString() : 'En attente'}
+                      </td>
+                      <td className="p-3">
+                        {log.status === 'Sent' ? (
+                          <span className="text-emerald-600 flex items-center gap-1 font-semibold">
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            Envoyé
+                          </span>
+                        ) : log.status === 'Failed' ? (
+                          <span className="text-red-500 flex items-center gap-1 font-semibold" title={log.error_message}>
+                            <XCircle className="w-3.5 h-3.5" />
+                            Échec
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            En attente
+                          </span>
+                        )}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {selectedCampaignDetails.logs.map(log => (
-                      <tr key={log.id}>
-                        <td><strong>{log.lead_name}</strong></td>
-                        <td><span style={{ color: '#a3a3a3' }}>{log.lead_email || '—'}</span></td>
-                        <td><span style={{ fontSize: '11px', color: '#555' }}>{log.sent_at ? new Date(log.sent_at).toLocaleTimeString() : 'En attente'}</span></td>
-                        <td>
-                          {log.status === 'Sent' ? (
-                            <span style={{ color: '#00BC7D', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 600 }}>
-                              <CheckCircle style={{ width: '12px' }} />
-                              Envoyé
-                            </span>
-                          ) : log.status === 'Failed' ? (
-                            <span style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 600 }} title={log.error_message}>
-                              <XCircle style={{ width: '12px' }} />
-                              Échec
-                            </span>
-                          ) : (
-                            <span style={{ color: '#666', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                              <Clock style={{ width: '12px' }} />
-                              En attente
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
