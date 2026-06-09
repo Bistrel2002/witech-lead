@@ -249,12 +249,22 @@ export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius =
   const pythonScript = path.resolve(__dirname, './scraper.py');
 
   return new Promise((resolve, reject) => {
-    const pyProcess = spawn(pythonBin, [
-      pythonScript,
-      '--category', finalCategory,
-      '--city', finalCity,
-      '--radius', String(radius)
-    ]);
+    let pyProcess;
+    try {
+      pyProcess = spawn(pythonBin, [
+        pythonScript,
+        '--category', finalCategory,
+        '--city', finalCity,
+        '--radius', String(radius)
+      ]);
+    } catch (err) {
+      return reject(new Error(`Impossible de lancer le scraper : ${err.message}`));
+    }
+
+    pyProcess.on('error', (err) => {
+      console.error('Failed to start python scraper process:', err);
+      reject(new Error(`Le scraper n'est pas configuré ou introuvable sur le serveur (Python/venv manquant).`));
+    });
 
     let stdoutData = '';
     let stderrData = '';
