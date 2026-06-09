@@ -5,7 +5,9 @@ import {
   Send, 
   Settings as SettingsIcon,
   Zap,
-  Globe
+  Globe,
+  Menu,
+  X
 } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
@@ -111,6 +113,7 @@ export default function App() {
   const [activePage, setActivePage] = useState('dashboard');
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Fetch leads from SQLite backend
   const loadLeadsFromApi = async () => {
@@ -188,18 +191,37 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* Mobile Top Bar */}
+      <div className="mobile-top-bar">
+        <div className="mobile-brand">
+          <Zap style={{ color: '#00BC7D', fill: '#00BC7D', width: '20px', height: '20px' }} />
+          <span>Wi'Tech <span className="accent">Lead</span></span>
+        </div>
+        <button className="mobile-menu-toggle" onClick={() => setMobileMenuOpen(true)}>
+          <Menu style={{ width: '24px', height: '24px' }} />
+        </button>
+      </div>
+
+      {/* Sidebar backdrop overlay on mobile */}
+      {mobileMenuOpen && (
+        <div className="sidebar-overlay" onClick={() => setMobileMenuOpen(false)} />
+      )}
+
       {/* Sidebar Navigation */}
-      <div className="sidebar">
+      <div className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <Zap style={{ color: '#00BC7D', fill: '#00BC7D', width: '22px', height: '22px' }} />
           <span>Wi'Tech <span className="accent">Lead</span></span>
+          <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>
+            <X style={{ width: '20px', height: '20px' }} />
+          </button>
         </div>
         
         <ul className="nav-links">
           <li>
             <div 
               className={`nav-item ${activePage === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActivePage('dashboard')}
+              onClick={() => { setActivePage('dashboard'); setMobileMenuOpen(false); }}
             >
               <LayoutDashboard />
               Tableau de Bord
@@ -208,7 +230,7 @@ export default function App() {
           <li>
             <div 
               className={`nav-item ${activePage === 'leads' ? 'active' : ''}`}
-              onClick={() => setActivePage('leads')}
+              onClick={() => { setActivePage('leads'); setMobileMenuOpen(false); }}
             >
               <Users />
               Prospects
@@ -217,7 +239,7 @@ export default function App() {
           <li>
             <div 
               className={`nav-item ${activePage === 'campaigns' ? 'active' : ''}`}
-              onClick={() => setActivePage('campaigns')}
+              onClick={() => { setActivePage('campaigns'); setMobileMenuOpen(false); }}
             >
               <Send />
               Campagnes Outreach
@@ -226,7 +248,7 @@ export default function App() {
           <li>
             <div 
               className={`nav-item ${activePage === 'settings' ? 'active' : ''}`}
-              onClick={() => setActivePage('settings')}
+              onClick={() => { setActivePage('settings'); setMobileMenuOpen(false); }}
             >
               <SettingsIcon />
               Configurations

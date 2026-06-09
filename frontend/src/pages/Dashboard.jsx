@@ -232,28 +232,30 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
         <div className="col col-6">
           <div className="glass-panel" style={{ minHeight: '340px' }}>
             <h3 style={{ fontSize: '16px', marginBottom: '16px' }}>Tunnel de Prospection</h3>
-            <div style={{ width: '100%', height: '240px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={totalLeads > 0 ? statusChartData : defaultStatusData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={75}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ background: '#0e0e0e', borderColor: 'rgba(255,255,255,0.08)', borderRadius: '8px', color: '#fff' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '16px' }}>
+            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '20px', minHeight: '240px', padding: '10px 0' }}>
+              <div style={{ width: '160px', height: '160px', flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={totalLeads > 0 ? statusChartData : defaultStatusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={65}
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ background: '#0e0e0e', borderColor: 'rgba(255,255,255,0.08)', borderRadius: '8px', color: '#fff' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '120px' }}>
                 {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
                   <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
                     <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: entry.color }}></span>

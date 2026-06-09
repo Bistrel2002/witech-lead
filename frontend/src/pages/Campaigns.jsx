@@ -369,7 +369,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                     placeholder="Ecrivez votre email ici..."
                   />
                 </div>
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowTemplateForm(false)}>Annuler</button>
                   <button type="submit" className="btn btn-primary">Sauvegarder le Modèle</button>
                 </div>
@@ -535,7 +535,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                   </div>
                   
                   {/* Manual mailto action queue helper */}
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
                     <button 
                       type="button" 
                       className="btn btn-secondary btn-sm" style={{ flex: 1 }}

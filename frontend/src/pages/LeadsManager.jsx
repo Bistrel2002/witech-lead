@@ -971,7 +971,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             Importez, analysez et qualifiez vos cibles avec l'audit digital automatisé.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           {/* CRM View Toggle (Board vs List) */}
           <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: '3px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)', marginRight: '8px' }}>
             <button 
@@ -1078,7 +1078,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         <p style={{ color: '#a3a3a3', fontSize: '12px', marginBottom: '14px' }}>
           Collez le lien de votre recherche Google Maps. Le système extrait les établissements, <strong>élimine ceux sans site web</strong>, détecte les failles digitales et classe tout par catégories hermétiques.
         </p>
-        <form onSubmit={handleMapsLinkScrape} style={{ display: 'flex', gap: '10px' }}>
+        <form onSubmit={handleMapsLinkScrape} className="flex-responsive">
           <div style={{ flex: 1, position: 'relative' }}>
             <Link2 style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '16px', color: '#666' }} />
             <input 
@@ -1229,7 +1229,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
       {/* Advanced Filters Panel */}
       <div className="glass-panel mb-20" style={{ padding: '14px 20px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+        <div className="flex-responsive">
           {/* Search bar */}
           <div style={{ flex: 2, minWidth: '200px', position: 'relative' }}>
             <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '15px', color: '#666' }} />
