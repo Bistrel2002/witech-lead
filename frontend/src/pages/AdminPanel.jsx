@@ -21,6 +21,8 @@ export default function AdminPanel({ apiHost }) {
     // If VITE_MOCK_AUTH is active, we can bypass immediately
     if (import.meta.env.VITE_MOCK_AUTH === 'true') {
       setIsAuthenticated(true);
+    } else if (localStorage.getItem('witech_admin_portal_token')) {
+      setIsAuthenticated(true);
     }
   }, []);
 
@@ -45,6 +47,9 @@ export default function AdminPanel({ apiHost }) {
       const data = await res.json();
 
       if (res.ok) {
+        if (data.token) {
+          localStorage.setItem('witech_admin_portal_token', data.token);
+        }
         setIsAuthenticated(true);
       } else {
         setAuthError(data.error || 'Mot de passe incorrect.');
@@ -159,6 +164,7 @@ export default function AdminPanel({ apiHost }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ portal: 'admin' })
     });
+    localStorage.removeItem('witech_admin_portal_token');
     setIsAuthenticated(false);
   };
 

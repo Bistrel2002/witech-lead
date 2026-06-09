@@ -161,10 +161,28 @@ export default function App() {
   // Check user authentication session on mount
   useEffect(() => {
     const checkSession = async () => {
+      // 1. Capture token from redirect URL parameter (OAuth)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token');
+      if (urlToken) {
+        localStorage.setItem('witech_auth_token', urlToken);
+        // Scrub query params from URL address bar
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+      }
+
       if (import.meta.env.VITE_MOCK_AUTH === 'true') {
         setUser({ id: 1, email: 'dev@witech.local', name: 'Developer Bypass', role: 'admin' });
         setCheckingSession(false);
         loadLeadsFromApi();
+        return;
+      }
+
+      // Check if we have an active token or active cookies
+      const hasToken = localStorage.getItem('witech_auth_token') || document.cookie.includes('auth_token');
+      if (!hasToken) {
+        setUser(null);
+        setCheckingSession(false);
         return;
       }
 
@@ -176,6 +194,7 @@ export default function App() {
           loadLeadsFromApi();
         } else {
           setUser(null);
+          localStorage.removeItem('witech_auth_token');
         }
       } catch (err) {
         console.warn('Failed to verify session with backend.');
@@ -187,7 +206,10 @@ export default function App() {
     checkSession();
   }, []);
 
-  const handleLoginSuccess = (loggedInUser) => {
+  const handleLoginSuccess = (loggedInUser, token) => {
+    if (token) {
+      localStorage.setItem('witech_auth_token', token);
+    }
     setUser(loggedInUser);
     loadLeadsFromApi();
   };
@@ -196,6 +218,7 @@ export default function App() {
     try {
       await fetch(`${API_HOST}/api/auth/logout`, { method: 'POST' });
     } catch (_) {}
+    localStorage.removeItem('witech_auth_token');
     setUser(null);
   };
 

@@ -51,7 +51,7 @@ router.post('/signup', async (req, res) => {
       maxAge: 7 * 24 * 3600 * 1000 // 7 days
     });
 
-    res.status(201).json({ user });
+    res.status(201).json({ token, user });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -85,6 +85,7 @@ router.post('/login', async (req, res) => {
     });
 
     res.json({
+      token,
       user: {
         id: user.id,
         email: user.email,
@@ -136,8 +137,9 @@ router.get('/google', async (req, res) => {
       maxAge: 7 * 24 * 3600 * 1000
     });
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return res.redirect(frontendUrl);
+    const redirectUri = req.query.redirect_uri || process.env.FRONTEND_URL || 'http://localhost:5173';
+    const separator = redirectUri.includes('?') ? '&' : '?';
+    return res.redirect(`${redirectUri}${separator}token=${token}`);
   } catch (error) {
     return res.status(500).send(`Auth Error: ${error.message}`);
   }
@@ -171,8 +173,9 @@ router.get('/apple', async (req, res) => {
       maxAge: 7 * 24 * 3600 * 1000
     });
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return res.redirect(frontendUrl);
+    const redirectUri = req.query.redirect_uri || process.env.FRONTEND_URL || 'http://localhost:5173';
+    const separator = redirectUri.includes('?') ? '&' : '?';
+    return res.redirect(`${redirectUri}${separator}token=${token}`);
   } catch (error) {
     return res.status(500).send(`Auth Error: ${error.message}`);
   }
@@ -215,7 +218,7 @@ router.post('/verify-portal', (req, res) => {
     maxAge: 8 * 3600 * 1000 // 8 hours
   });
 
-  res.json({ success: true, message: `Bienvenue dans le portail ${portal}.` });
+  res.json({ success: true, token: portalToken, message: `Bienvenue dans le portail ${portal}.` });
 });
 
 // PORTAL LOGOUT

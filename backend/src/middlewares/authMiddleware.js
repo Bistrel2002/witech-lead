@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-// Authenticates standard logged-in users via JWT cookies
+// Authenticates standard logged-in users via JWT cookies or Authorization Header
 export function authenticateUser(req, res, next) {
   // Developer bypass switch for local testing
   if (process.env.VITE_MOCK_AUTH === 'true') {
@@ -8,7 +8,12 @@ export function authenticateUser(req, res, next) {
     return next();
   }
 
-  const token = req.cookies.auth_token;
+  let token = req.cookies.auth_token;
+  // Fallback to Bearer token in headers for cross-origin deployments (Vercel)
+  if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
   if (!token) {
     return res.status(401).json({ error: 'Accès refusé. Veuillez vous connecter.' });
   }
@@ -32,7 +37,12 @@ export function authenticatePortal(portalType) {
     }
 
     const cookieName = `${portalType}_portal_token`;
-    const token = req.cookies[cookieName];
+    let token = req.cookies[cookieName];
+    // Fallback to custom portal headers for cross-origin deployments (Vercel)
+    if (!token) {
+      token = req.headers[`x-${portalType}-portal-token`] || req.headers[`x-${portalType}-portal-token`.toLowerCase()];
+    }
+
     if (!token) {
       return res.status(403).json({ error: `Accès interdit. Authentification requise pour le portail ${portalType}.` });
     }
@@ -50,3 +60,4 @@ export function authenticatePortal(portalType) {
     }
   };
 }
+

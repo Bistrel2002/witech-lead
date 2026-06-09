@@ -21,6 +21,8 @@ export default function TeamSpace({ apiHost }) {
   useEffect(() => {
     if (import.meta.env.VITE_MOCK_AUTH === 'true') {
       setIsAuthenticated(true);
+    } else if (localStorage.getItem('witech_team_portal_token')) {
+      setIsAuthenticated(true);
     }
   }, []);
 
@@ -45,6 +47,9 @@ export default function TeamSpace({ apiHost }) {
       const data = await res.json();
 
       if (res.ok) {
+        if (data.token) {
+          localStorage.setItem('witech_team_portal_token', data.token);
+        }
         setIsAuthenticated(true);
       } else {
         setAuthError(data.error || 'Mot de passe incorrect.');
@@ -90,6 +95,7 @@ export default function TeamSpace({ apiHost }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ portal: 'team' })
     });
+    localStorage.removeItem('witech_team_portal_token');
     setIsAuthenticated(false);
   };
 

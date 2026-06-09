@@ -39,7 +39,8 @@ export default function Login({ apiHost, onLoginSuccess }) {
   };
 
   const handleOAuth = (provider) => {
-    window.location.href = `${apiHost}/api/auth/${provider}`;
+    const redirectUri = encodeURIComponent(window.location.origin);
+    window.location.href = `${apiHost}/api/auth/${provider}?redirect_uri=${redirectUri}`;
   };
 
   return (
