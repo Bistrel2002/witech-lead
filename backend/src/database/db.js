@@ -101,6 +101,18 @@ async function initDb(db) {
     )
   `);
 
+  // Create lead_discussions table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS lead_discussions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(lead_id) REFERENCES leads(id)
+    )
+  `);
+
   // Create settings table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS settings (

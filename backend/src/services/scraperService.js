@@ -317,11 +317,12 @@ export async function scrapeGoogleMapsFromLink(mapsUrl) {
     // Check if it's a list (contains business card links) or a single place card directly
     let isSingleResult = false;
     try {
-      await page.waitForSelector('a.hfpxzc, h1.DUwDgc', { timeout: 20000 });
+      await page.waitForSelector('a.hfpxzc, h1.DUwDgc, h1.DUwDvf, h1.lfPIob', { timeout: 20000 });
       console.log('Page Google Maps chargée avec succès.');
       
       isSingleResult = await page.evaluate(() => {
-        return !document.querySelector('a.hfpxzc') && !!document.querySelector('h1.DUwDgc');
+        return !document.querySelector('a.hfpxzc') && 
+          (!!document.querySelector('h1.DUwDgc') || !!document.querySelector('h1.DUwDvf') || !!document.querySelector('h1.lfPIob'));
       });
       
       if (isSingleResult) {
@@ -336,7 +337,7 @@ export async function scrapeGoogleMapsFromLink(mapsUrl) {
       console.log(`[DEBUG SCRAPER] Échec du chargement. URL actuelle: ${currentUrl}, Titre: ${pageTitle}, Erreur: ${err.message}`);
       
       try {
-        await page.screenshot({ path: '/Users/vivienbistrel/.gemini/antigravity-ide/brain/581069b2-25e9-479d-94ee-efee306624cd/debug_screenshot.png' });
+        await page.screenshot({ path: 'debug_screenshot.png' });
         console.log('[DEBUG SCRAPER] Screenshot de débogage sauvegardé sous debug_screenshot.png');
       } catch (screenErr) {
         console.error('[DEBUG SCRAPER] Échec de la capture d\'écran :', screenErr.message);
@@ -369,12 +370,13 @@ export async function scrapeGoogleMapsFromLink(mapsUrl) {
 
     if (isSingleResult) {
       const singleLead = await page.evaluate(() => {
-        const nameEl = document.querySelector('h1.DUwDgc');
+        // Name (handles class DUwDgc and the new DUwDvf/lfPIob)
+        const nameEl = document.querySelector('h1.DUwDvf, h1.DUwDgc, h1.lfPIob, h1');
         const name = nameEl ? nameEl.textContent.trim() : '';
         
-        // Website URL from listing authority details with google redirect cleaning
+        // Website URL (handles authority data-item-id, site web tooltips, and aria-labels)
         let website = '';
-        const webEl = document.querySelector('a[data-item-id="authority"]');
+        const webEl = document.querySelector('a[data-item-id="authority"], a[data-tooltip*="site Web"], a[data-tooltip*="Website"], a[aria-label*="Site Web"], a[aria-label*="Website"]');
         if (webEl) {
           const href = webEl.getAttribute('href') || '';
           if (href.includes('/url?q=')) {
@@ -393,32 +395,51 @@ export async function scrapeGoogleMapsFromLink(mapsUrl) {
           }
         }
 
-        // Phone number
-        const phoneEl = document.querySelector('button[data-item-id^="phone:tel:"]');
+        // Phone number (handles phone:tel: data-item-id, telephone tooltips, and aria-labels)
+        const phoneEl = document.querySelector('button[data-item-id^="phone:tel:"], button[data-tooltip*="téléphone"], button[aria-label*="Numéro de téléphone"]');
         let phone = '';
         if (phoneEl) {
           const itemId = phoneEl.getAttribute('data-item-id') || '';
-          phone = itemId.replace('phone:tel:', '').trim();
+          if (itemId && itemId.startsWith('phone:tel:')) {
+            phone = itemId.replace('phone:tel:', '').trim();
+          } else {
+            const ioEl = phoneEl.querySelector('.Io6YTe');
+            phone = ioEl ? ioEl.textContent.trim() : phoneEl.textContent.trim();
+          }
         }
 
-        // Address
+        // Address (handles address data-item-id and the inner Io6YTe text class)
         const addrEl = document.querySelector('button[data-item-id="address"]');
-        const address = addrEl ? addrEl.textContent.trim() : '';
+        let address = '';
+        if (addrEl) {
+          const ioEl = addrEl.querySelector('.Io6YTe');
+          address = ioEl ? ioEl.textContent.trim() : addrEl.textContent.trim();
+        }
 
         // Rating
         const ratingEl = document.querySelector('div.F7nice span[aria-hidden="true"]');
         const ratingVal = ratingEl ? parseFloat(ratingEl.textContent.replace(',', '.')) : null;
 
-        // Review Count
-        const reviewsEl = document.querySelector('div.F7nice span[aria-label*="avis"]');
+        // Review Count (checks standard aria-labels first, then falls back to text content parsing like (56))
         let reviewCountVal = 0;
+        const reviewsEl = document.querySelector('div.F7nice span[aria-label*="avis"], div.F7nice span[aria-label*="review"]');
         if (reviewsEl) {
           const matches = reviewsEl.getAttribute('aria-label').match(/\d+/);
           reviewCountVal = matches ? parseInt(matches[0], 10) : 0;
+        } else {
+          const allSpans = Array.from(document.querySelectorAll('div.F7nice span'));
+          for (const s of allSpans) {
+            const txt = s.textContent.trim();
+            const m = txt.match(/^\((\d+)\)$/);
+            if (m) {
+              reviewCountVal = parseInt(m[1], 10);
+              break;
+            }
+          }
         }
 
-        // Category
-        const catEl = document.querySelector('button[jsaction*="pane.rating.category"]');
+        // Category (handles new DkEaL class and standard category buttons/labels)
+        const catEl = document.querySelector('button.DkEaL, button[jsaction*="category"], button[jsaction*="pane.rating.category"]');
         const categoryVal = catEl ? catEl.textContent.trim() : '';
 
         return {

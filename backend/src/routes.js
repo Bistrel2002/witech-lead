@@ -197,12 +197,59 @@ router.delete('/leads/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
+    // Delete associated discussions first to prevent orphaned records
+    await db.run('DELETE FROM lead_discussions WHERE lead_id = ?', id);
     await db.run('DELETE FROM leads WHERE id = ?', id);
     res.json({ message: 'Lead deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Get discussions for a specific lead
+router.get('/leads/:id/discussions', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await getDb();
+    const discussions = await db.all('SELECT * FROM lead_discussions WHERE lead_id = ? ORDER BY created_at DESC', id);
+    res.json(discussions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add a discussion entry for a lead
+router.post('/leads/:id/discussions', async (req, res) => {
+  const { id } = req.params;
+  const { type, content, created_at } = req.body;
+  if (!type || !content) {
+    return res.status(400).json({ error: 'Type and content are required' });
+  }
+  try {
+    const db = await getDb();
+    const result = await db.run(
+      'INSERT INTO lead_discussions (lead_id, type, content, created_at) VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))',
+      id, type, content, created_at || null
+    );
+    const newDiscussion = await db.get('SELECT * FROM lead_discussions WHERE id = ?', result.lastID);
+    res.status(201).json(newDiscussion);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a specific discussion entry
+router.delete('/leads/discussions/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await getDb();
+    await db.run('DELETE FROM lead_discussions WHERE id = ?', id);
+    res.json({ message: 'Discussion entry deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // Bulk Import Google Maps / Simulated Search Leads / Custom File Leads
 router.post('/leads/import', async (req, res) => {

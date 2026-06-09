@@ -29,7 +29,9 @@ import {
   Upload,
   Kanban,
   LayoutList,
-  Building2
+  Building2,
+  Calendar,
+  MessageCircle
 } from 'lucide-react';
 
 // Pipeline statuses matching the PRD (§4.2)
@@ -41,6 +43,35 @@ const PIPELINE_STATUSES = [
   'Closed Won',
   'Closed Lost'
 ];
+
+// Mock discussions for demo fallback mode when API is offline/empty
+const getMockDiscussions = (leadId) => {
+  const now = new Date();
+  const formatTime = (daysAgo) => new Date(now.getTime() - daysAgo * 24 * 3600 * 1000).toISOString();
+  
+  if (leadId === 991) {
+    return [
+      { id: 'm1', lead_id: 991, type: 'Note', content: "Prospect identifié sur Google Maps dans la catégorie Plombier. Site internet moderne mais aucune adresse email publique trouvée.", created_at: formatTime(2) }
+    ];
+  }
+  if (leadId === 992) {
+    return [
+      { id: 'm2_1', lead_id: 992, type: 'Call', content: "Appel de suivi : Le gérant (M. Lefebvre) confirme l'intérêt pour l'automatisation de sa facturation via n8n. Rendez-vous planifié pour une démo.", created_at: formatTime(0.5) },
+      { id: 'm2_2', lead_id: 992, type: 'Email', content: "Campagne Outreach : Email automatique envoyé avec la template d'automatisation de processus.", created_at: formatTime(1) }
+    ];
+  }
+  if (leadId === 993) {
+    return [
+      { id: 'm3_1', lead_id: 993, type: 'WhatsApp', content: "Message envoyé sur Instagram : Demande si le salon a déjà envisagé de créer un site internet pour les réservations en ligne.", created_at: formatTime(3) }
+    ];
+  }
+  if (leadId === 994) {
+    return [
+      { id: 'm4_1', lead_id: 994, type: 'Note', content: "Site web analysé (Squarespace). Très propre mais pas de widget de chat ni de formulaire d'automatisation de devis.", created_at: formatTime(1) }
+    ];
+  }
+  return [];
+};
 
 // Database fields metadata for smart mapping & classification
 const DATABASE_FIELDS = [
@@ -156,6 +187,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [newLead, setNewLead] = useState({
     name: '', category: 'Plombier', website: '', phone: '', email: '', city: '', address: '', notes: ''
   });
+
+  // States for lead discussions/timeline
+  const [discussions, setDiscussions] = useState([]);
+  const [loadingDiscussions, setLoadingDiscussions] = useState(false);
+  const [discussionType, setDiscussionType] = useState('Note');
+  const [discussionContent, setDiscussionContent] = useState('');
+  const [addingDiscussion, setAddingDiscussion] = useState(false);
 
   // File Import Wizard States
   const [showImportModal, setShowImportModal] = useState(false);
@@ -704,6 +742,113 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       await reloadLeads();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Fetch discussions for an active lead
+  const fetchDiscussions = async (leadId) => {
+    setLoadingDiscussions(true);
+    try {
+      const response = await fetch(`${apiHost}/api/leads/${leadId}/discussions`);
+      if (response.ok) {
+        const data = await response.json();
+        setDiscussions(data);
+      } else {
+        setDiscussions(getMockDiscussions(leadId));
+      }
+    } catch (err) {
+      console.warn("Could not fetch discussions from backend, loading mock fallbacks:", err);
+      setDiscussions(getMockDiscussions(leadId));
+    } finally {
+      setLoadingDiscussions(false);
+    }
+  };
+
+  // Fetch discussions when active lead changes
+  useEffect(() => {
+    if (activeLeadDetails && activeLeadDetails.id) {
+      fetchDiscussions(activeLeadDetails.id);
+    } else {
+      setDiscussions([]);
+    }
+  }, [activeLeadDetails]);
+
+  // Add a discussion record
+  const handleAddDiscussion = async (e) => {
+    e.preventDefault();
+    if (!discussionContent.trim() || !activeLeadDetails) return;
+
+    setAddingDiscussion(true);
+    const leadId = activeLeadDetails.id;
+    const newEntry = {
+      type: discussionType,
+      content: discussionContent.trim()
+    };
+
+    try {
+      const response = await fetch(`${apiHost}/api/leads/${leadId}/discussions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEntry)
+      });
+
+      if (response.ok) {
+        setDiscussionContent('');
+        await fetchDiscussions(leadId);
+      } else {
+        // Fallback: update state locally if API is offline
+        const mockNew = {
+          id: `local_${Date.now()}`,
+          lead_id: leadId,
+          type: discussionType,
+          content: discussionContent.trim(),
+          created_at: new Date().toISOString()
+        };
+        setDiscussions([mockNew, ...discussions]);
+        setDiscussionContent('');
+      }
+    } catch (err) {
+      console.error(err);
+      // Fallback local update
+      const mockNew = {
+        id: `local_${Date.now()}`,
+        lead_id: leadId,
+        type: discussionType,
+        content: discussionContent.trim(),
+        created_at: new Date().toISOString()
+      };
+      setDiscussions([mockNew, ...discussions]);
+      setDiscussionContent('');
+    } finally {
+      setAddingDiscussion(false);
+    }
+  };
+
+  // Delete a discussion record
+  const handleDeleteDiscussion = async (id) => {
+    if (!window.confirm("Voulez-vous vraiment supprimer cet échange ?")) return;
+
+    try {
+      // Check if it's a local fallback ID
+      if (String(id).startsWith('local_') || String(id).startsWith('m')) {
+        setDiscussions(discussions.filter(d => d.id !== id));
+        return;
+      }
+
+      const response = await fetch(`${apiHost}/api/leads/discussions/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        if (activeLeadDetails) {
+          await fetchDiscussions(activeLeadDetails.id);
+        }
+      } else {
+        setDiscussions(discussions.filter(d => d.id !== id));
+      }
+    } catch (err) {
+      console.error(err);
+      setDiscussions(discussions.filter(d => d.id !== id));
     }
   };
 
@@ -1774,16 +1919,203 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </div>
               </div>
 
-              {/* Editable Notes Section */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Journal d'activités & Notes</label>
+              {/* General Note */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notes Générales</label>
                 <textarea 
                   className="form-control" 
                   defaultValue={activeLeadDetails.notes} 
                   onBlur={(e) => handleSaveNotes(activeLeadDetails.id, e.target.value)}
-                  placeholder="Notes privées et journal d'échanges (sauvegarde automatique)..."
-                  style={{ minHeight: '130px', fontSize: '12px', background: 'rgba(8, 8, 8, 0.4)' }}
+                  placeholder="Notes générales sur le prospect..."
+                  style={{ minHeight: '80px', fontSize: '12px', background: 'rgba(8, 8, 8, 0.4)' }}
                 />
+              </div>
+
+              {/* Discussion History / Timeline */}
+              <div className="glass-panel" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderColor: 'rgba(255,255,255,0.04)' }}>
+                <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, display: 'block', marginBottom: '12px' }}>
+                  Suivi des Échanges (Conversations)
+                </span>
+
+                {/* Form to add interaction */}
+                <form onSubmit={handleAddDiscussion} style={{ marginBottom: '16px' }}>
+                  {/* Select Interaction Type */}
+                  <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                    {[
+                      { type: 'Note', label: 'Note', icon: FileText, color: '#9ca3af', bg: 'rgba(156, 163, 175, 0.1)' },
+                      { type: 'Email', label: 'Email', icon: Mail, color: '#00BC7D', bg: 'rgba(0, 188, 125, 0.1)' },
+                      { type: 'Call', label: 'Appel', icon: Phone, color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.1)' },
+                      { type: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle, color: '#87D6C2', bg: 'rgba(135, 214, 194, 0.1)' },
+                      { type: 'Meeting', label: 'RDV', icon: Calendar, color: '#c084fc', bg: 'rgba(192, 132, 252, 0.1)' }
+                    ].map(btn => {
+                      const Icon = btn.icon;
+                      const isSelected = discussionType === btn.type;
+                      return (
+                        <button
+                          key={btn.type}
+                          type="button"
+                          onClick={() => setDiscussionType(btn.type)}
+                          style={{
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '6px 2px',
+                            borderRadius: '8px',
+                            border: '1px solid',
+                            borderColor: isSelected ? btn.color : 'rgba(255,255,255,0.04)',
+                            background: isSelected ? btn.bg : 'rgba(255,255,255,0.01)',
+                            color: isSelected ? '#fff' : '#666',
+                            fontSize: '10px',
+                            fontWeight: isSelected ? '600' : '400',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <Icon style={{ width: '14px', height: '14px', color: isSelected ? btn.color : '#555' }} />
+                          {btn.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Input content */}
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={discussionContent}
+                      onChange={(e) => setDiscussionContent(e.target.value)}
+                      placeholder={`Saisir le résumé de l'échange (${discussionType === 'Call' ? 'ex: Appel M. Lefebvre, intéressé' : discussionType === 'Email' ? 'ex: Devis envoyé' : 'ex: RDV planifié'})`}
+                      style={{ fontSize: '12px', padding: '8px 12px', height: '36px' }}
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-sm"
+                      style={{ height: '36px', padding: '0 12px', borderRadius: '12px', flexShrink: 0 }}
+                      disabled={addingDiscussion || !discussionContent.trim()}
+                    >
+                      {addingDiscussion ? <RefreshCw style={{ width: '12px', animation: 'spin 1s linear infinite' }} /> : 'Ajouter'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Timeline Items */}
+                {loadingDiscussions ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
+                    <RefreshCw style={{ width: '20px', height: '20px', color: '#00BC7D', animation: 'spin 1.2s linear infinite' }} />
+                  </div>
+                ) : discussions.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '24px 0', border: '1px dashed rgba(255,255,255,0.04)', borderRadius: '8px', background: 'rgba(255,255,255,0.005)' }}>
+                    <MessageSquare style={{ width: '24px', height: '24px', color: '#333', margin: '0 auto 8px auto' }} />
+                    <p style={{ fontSize: '11px', color: '#555', margin: 0 }}>Aucun échange enregistré pour le moment.</p>
+                  </div>
+                ) : (
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '12px', 
+                      maxHeight: '320px', 
+                      overflowY: 'auto', 
+                      paddingRight: '4px' 
+                    }}
+                  >
+                    {discussions.map((item) => {
+                      // Get config based on type
+                      const configMap = {
+                        'Note': { icon: FileText, color: '#9ca3af', label: 'Note' },
+                        'Email': { icon: Mail, color: '#00BC7D', label: 'Email' },
+                        'Call': { icon: Phone, color: '#fbbf24', label: 'Appel' },
+                        'WhatsApp': { icon: MessageCircle, color: '#87D6C2', label: 'WhatsApp' },
+                        'Meeting': { icon: Calendar, color: '#c084fc', label: 'RDV' }
+                      };
+                      const config = configMap[item.type] || { icon: FileText, color: '#9ca3af', label: item.type };
+                      const ItemIcon = config.icon;
+                      
+                      // Format date in French
+                      const dateObj = new Date(item.created_at);
+                      const formattedDate = isNaN(dateObj.getTime())
+                        ? item.created_at
+                        : dateObj.toLocaleDateString('fr-FR', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          });
+
+                      return (
+                        <div 
+                          key={item.id} 
+                          className="timeline-item-row"
+                          style={{ 
+                            display: 'flex', 
+                            gap: '12px', 
+                            position: 'relative', 
+                            padding: '8px 10px', 
+                            background: 'rgba(255,255,255,0.01)', 
+                            border: '1px solid rgba(255,255,255,0.03)', 
+                            borderRadius: '10px' 
+                          }}
+                        >
+                          {/* Type Icon Indicator */}
+                          <div style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '8px',
+                            background: `rgba(${item.type === 'Email' ? '0, 188, 125' : item.type === 'Call' ? '251, 191, 36' : item.type === 'WhatsApp' ? '135, 214, 194' : item.type === 'Meeting' ? '192, 132, 252' : '156, 163, 175'}, 0.08)`,
+                            border: `1px solid rgba(${item.type === 'Email' ? '0, 188, 125' : item.type === 'Call' ? '251, 191, 36' : item.type === 'WhatsApp' ? '135, 214, 194' : item.type === 'Meeting' ? '192, 132, 252' : '156, 163, 175'}, 0.2)`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0
+                          }}>
+                            <ItemIcon style={{ width: '13px', height: '13px', color: config.color }} />
+                          </div>
+
+                          {/* Content */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '2px' }}>
+                              <span style={{ fontSize: '10px', fontWeight: '600', color: config.color, textTransform: 'uppercase' }}>
+                                {config.label}
+                              </span>
+                              <span style={{ fontSize: '10px', color: '#555' }}>
+                                {formattedDate}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '12px', color: '#d1d5db', margin: 0, overflowWrap: 'anywhere' }}>
+                              {item.content}
+                            </p>
+                          </div>
+
+                          {/* Hover delete option */}
+                          <button
+                            type="button"
+                            className="delete-item-btn"
+                            onClick={() => handleDeleteDiscussion(item.id)}
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'rgba(239, 68, 68, 0.4)',
+                              cursor: 'pointer',
+                              padding: '2px',
+                              display: 'none',
+                              transition: 'color 0.15s ease'
+                            }}
+                            title="Supprimer cet échange"
+                          >
+                            <Trash2 style={{ width: '11px', height: '11px' }} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
             </div>
@@ -2163,6 +2495,12 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         }
         .crm-board-card:hover .card-title-hover {
           color: var(--primary) !important;
+        }
+        .timeline-item-row:hover .delete-item-btn {
+          display: block !important;
+        }
+        .timeline-item-row:hover .delete-item-btn:hover {
+          color: rgba(239, 68, 68, 1) !important;
         }
       `}</style>
     </div>
