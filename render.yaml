@@ -1,0 +1,73 @@
+# ==========================================
+# RENDER BLUEPRINT – Witech Lead CRM
+# ==========================================
+# This file defines the complete infrastructure for Render.
+# Deploy both frontend (static site) and backend (web service)
+# from a single monorepo.
+#
+# Usage:
+#   1. Push this repo to GitHub
+#   2. Go to https://dashboard.render.com → New → Blueprint
+#   3. Connect your GitHub repo
+#   4. Render auto-detects this file and creates both services
+# ==========================================
+
+services:
+  # ── Backend API (Express.js Web Service) ──────────────────────
+  - type: web
+    name: witech-lead-api
+    runtime: node
+    region: frankfurt  # EU region for French users
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: JWT_SECRET
+        generateValue: true  # Render auto-generates a secure random string
+      - key: ADMIN_PORTAL_PASSWORD
+        sync: false  # Will prompt you to enter during setup
+      - key: TEAM_PORTAL_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false  # You'll set this after the frontend deploys
+      - key: BACKEND_URL
+        sync: false  # You'll set this to the backend's own URL
+      - key: VITE_MOCK_AUTH
+        value: "false"  # Disable dev bypass in production!
+    healthCheckPath: /
+
+  # ── Frontend (Vite Static Site) ───────────────────────────────
+  - type: web
+    name: witech-lead-app
+    runtime: static
+    region: frankfurt
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      # SPA catch-all: serve index.html for all client-side routes
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false  # You'll set this to the backend Render URL
+      - key: VITE_MOCK_AUTH
+        value: "false"

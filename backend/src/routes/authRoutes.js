@@ -48,7 +48,7 @@ router.post('/signup', async (req, res) => {
     res.cookie('auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 3600 * 1000 // 7 days
     });
 
@@ -81,7 +81,7 @@ router.post('/login', async (req, res) => {
     res.cookie('auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 3600 * 1000 // 7 days
     });
 
@@ -117,7 +117,12 @@ router.get('/me', authenticateUser, (req, res) => {
 // 1. Google Auth Trigger
 router.get('/google', (req, res) => {
   const redirectUriParam = req.query.redirect_uri || process.env.FRONTEND_URL || 'http://localhost:5173';
-  res.cookie('oauth_redirect_uri', redirectUriParam, { maxAge: 10 * 60 * 1000, httpOnly: true });
+  res.cookie('oauth_redirect_uri', redirectUriParam, {
+    maxAge: 10 * 60 * 1000,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  });
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -338,7 +343,12 @@ router.get('/google/callback', async (req, res) => {
 // 1. Apple Auth Trigger
 router.get('/apple', (req, res) => {
   const redirectUriParam = req.query.redirect_uri || process.env.FRONTEND_URL || 'http://localhost:5173';
-  res.cookie('oauth_redirect_uri', redirectUriParam, { maxAge: 10 * 60 * 1000, httpOnly: true });
+  res.cookie('oauth_redirect_uri', redirectUriParam, {
+    maxAge: 10 * 60 * 1000,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  });
 
   const clientId = process.env.APPLE_CLIENT_ID;
   
@@ -494,7 +504,7 @@ router.post('/verify-portal', (req, res) => {
   res.cookie(cookieName, portalToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 8 * 3600 * 1000 // 8 hours
   });
 
