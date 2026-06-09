@@ -49,7 +49,6 @@ services:
   - type: web
     name: witech-lead-app
     runtime: static
-    region: frankfurt
     plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
