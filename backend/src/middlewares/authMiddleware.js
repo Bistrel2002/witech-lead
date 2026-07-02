@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken';
+import { getDb } from '../database/db.js';
 
 // Authenticates standard logged-in users via JWT cookies or Authorization Header
-export function authenticateUser(req, res, next) {
+export async function authenticateUser(req, res, next) {
   // Developer bypass switch for local testing
   if (process.env.VITE_MOCK_AUTH === 'true') {
     req.user = { id: 1, email: 'dev@witech.local', name: 'Developer Bypass', role: 'admin' };
@@ -20,6 +21,14 @@ export function authenticateUser(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'witech-secret');
+    
+    // Verify user still exists in database
+    const db = await getDb();
+    const userExists = await db.get('SELECT id FROM users WHERE id = ?', decoded.id);
+    if (!userExists) {
+      throw new Error('User does not exist in the database');
+    }
+    
     req.user = decoded;
     next();
   } catch (err) {

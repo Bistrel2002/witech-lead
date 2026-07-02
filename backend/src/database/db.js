@@ -1,26 +1,16 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import pg from 'pg';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const dbPath = path.resolve(__dirname, '../../../database.sqlite');
 let dbInstance = null;
 let pgPoolInstance = null;
 
-// Database Adapter to abstract SQLite vs PostgreSQL
+// Database Adapter for PostgreSQL
 class DatabaseAdapter {
-  constructor(client, isPg = false) {
+  constructor(client) {
     this.client = client;
-    this.isPg = isPg;
+    this.isPg = true; // Kept for backward compatibility checks
   }
 
   _convertSql(sql) {
-    if (!this.isPg) return sql;
-
     let pgSql = sql;
     // Replace SQLite INSERT OR IGNORE / REPLACE with PostgreSQL ON CONFLICT
     if (/^\s*INSERT\s+OR\s+IGNORE\s+INTO\s+settings/i.test(pgSql)) {
@@ -38,74 +28,49 @@ class DatabaseAdapter {
   }
 
   async get(sql, ...params) {
-    if (this.isPg) {
-      const pgSql = this._convertSql(sql);
-      const res = await this.client.query(pgSql, params);
-      return res.rows[0];
-    } else {
-      return this.client.get(sql, ...params);
-    }
+    const pgSql = this._convertSql(sql);
+    const res = await this.client.query(pgSql, params);
+    return res.rows[0];
   }
 
   async all(sql, ...params) {
-    if (this.isPg) {
-      const pgSql = this._convertSql(sql);
-      const res = await this.client.query(pgSql, params);
-      return res.rows;
-    } else {
-      return this.client.all(sql, ...params);
-    }
+    const pgSql = this._convertSql(sql);
+    const res = await this.client.query(pgSql, params);
+    return res.rows;
   }
 
   async run(sql, ...params) {
-    if (this.isPg) {
-      let pgSql = this._convertSql(sql);
-      const isInsert = /^\s*insert\s+/i.test(sql);
-      if (isInsert && !/returning\s+/i.test(pgSql)) {
-        pgSql += ' RETURNING id';
-      }
-      const res = await this.client.query(pgSql, params);
-      const lastID = (isInsert && res.rows[0]) ? res.rows[0].id : null;
-      return { lastID, changes: res.rowCount };
-    } else {
-      return this.client.run(sql, ...params);
+    let pgSql = this._convertSql(sql);
+    const isInsert = /^\s*insert\s+/i.test(sql);
+    const isSettings = /into\s+settings/i.test(pgSql);
+    if (isInsert && !/returning\s+/i.test(pgSql) && !isSettings) {
+      pgSql += ' RETURNING id';
     }
+    const res = await this.client.query(pgSql, params);
+    const lastID = (isInsert && res.rows[0] && !isSettings) ? res.rows[0].id : null;
+    return { lastID, changes: res.rowCount };
   }
 
   async exec(sql) {
-    if (this.isPg) {
-      await this.client.query(sql);
-    } else {
-      await this.client.exec(sql);
-    }
+    await this.client.query(sql);
   }
 }
 
 export async function getDb() {
   if (dbInstance) return dbInstance;
 
-  const dbUrl = process.env.DATABASE_URL;
-  if (dbUrl && (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://'))) {
-    console.log("Database: Connecting to PostgreSQL...");
-    if (!pgPoolInstance) {
-      pgPoolInstance = new pg.Pool({
-        connectionString: dbUrl,
-        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-      });
-    }
-    dbInstance = new DatabaseAdapter(pgPoolInstance, true);
-    
-    // Initialize DB schema for Postgres
-    await initPostgresDb(dbInstance);
-  } else {
-    console.log("Database: Connecting to local SQLite database...");
-    const sqliteDb = await open({
-      filename: dbPath,
-      driver: sqlite3.Database
+  const dbUrl = process.env.DATABASE_URL || 'postgresql://localhost:5432/witech_crm';
+  console.log("Database: Connecting to PostgreSQL...");
+  if (!pgPoolInstance) {
+    pgPoolInstance = new pg.Pool({
+      connectionString: dbUrl,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     });
-    dbInstance = new DatabaseAdapter(sqliteDb, false);
-    await initSqliteDb(dbInstance);
   }
+  dbInstance = new DatabaseAdapter(pgPoolInstance);
+  
+  // Initialize DB schema for Postgres
+  await initPostgresDb(dbInstance);
 
   return dbInstance;
 }
@@ -118,208 +83,10 @@ export async function getFrenchDb() {
       connectionString: frenchDbUrl,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     });
-    return new DatabaseAdapter(pool, true);
+    return new DatabaseAdapter(pool);
   }
   // Fall back to main db if not configured separately
   return await getDb();
-}
-
-async function initSqliteDb(db) {
-  // Create users table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT,
-      name TEXT,
-      role TEXT DEFAULT 'user',
-      google_id TEXT,
-      apple_id TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create leads table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS leads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      website TEXT,
-      phone TEXT,
-      email TEXT,
-      google_maps_url TEXT,
-      status TEXT DEFAULT 'New',
-      city TEXT,
-      notes TEXT,
-      scraped_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-  `);
-
-  // Migrate: add new columns to leads table
-  const newColumns = [
-    'rating REAL',
-    'review_count INTEGER DEFAULT 0',
-    'address TEXT',
-    'has_ssl INTEGER DEFAULT 0',
-    'is_mobile_friendly INTEGER DEFAULT 0',
-    'has_chat_widget INTEGER DEFAULT 0',
-    'social_handles TEXT',
-    'load_time_ms INTEGER',
-    'tech_stack TEXT'
-  ];
-
-  for (const colDef of newColumns) {
-    try {
-      await db.exec(`ALTER TABLE leads ADD COLUMN ${colDef}`);
-    } catch (_) {
-      // Column already exists – ignore
-    }
-  }
-
-  // Create templates table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS templates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      name TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-  `);
-
-  // Create campaigns table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS campaigns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      name TEXT NOT NULL,
-      template_id INTEGER,
-      status TEXT DEFAULT 'Pending',
-      total_leads INTEGER DEFAULT 0,
-      sent_count INTEGER DEFAULT 0,
-      failed_count INTEGER DEFAULT 0,
-      channel TEXT DEFAULT 'email',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(template_id) REFERENCES templates(id) ON DELETE SET NULL
-    )
-  `);
-
-  // Ensure channel column exists in campaigns for SQLite (older databases)
-  try {
-    await db.exec(`ALTER TABLE campaigns ADD COLUMN channel TEXT DEFAULT 'email'`);
-  } catch (_) {
-    // Already exists
-  }
-
-  // Create campaign_logs table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS campaign_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id INTEGER,
-      lead_id INTEGER,
-      status TEXT,
-      error_message TEXT,
-      sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
-      FOREIGN KEY(lead_id) REFERENCES leads(id)
-    )
-  `);
-
-  // Create lead_discussions table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS lead_discussions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      lead_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(lead_id) REFERENCES leads(id)
-    )
-  `);
-
-  // Create settings table
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    )
-  `);
-
-  // Insert default settings
-  const defaultSettings = [
-    { key: 'smtp_host', value: '' },
-    { key: 'smtp_port', value: '587' },
-    { key: 'smtp_user', value: '' },
-    { key: 'smtp_pass', value: '' },
-    { key: 'smtp_from', value: '' },
-    { key: 'smtp_name', value: "Wi'Tech Agency" },
-    { key: 'company_name', value: "Wi'Tech Agency" },
-    { key: 'company_website', value: 'https://www.witechagency.com' },
-    { key: 'sender_signature', value: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com" },
-    { key: 'twilio_account_sid', value: '' },
-    { key: 'twilio_auth_token', value: '' },
-    { key: 'twilio_phone_number', value: '' },
-    { key: 'twilio_whatsapp_number', value: '' }
-  ];
-
-  for (const setting of defaultSettings) {
-    await db.run(
-      'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
-      setting.key,
-      setting.value
-    );
-  }
-
-  // Seed default templates
-  const templatesCount = await db.get('SELECT COUNT(*) as count FROM templates');
-  if (templatesCount.count === 0) {
-    await db.run(
-      'INSERT INTO templates (name, subject, body) VALUES (?, ?, ?)',
-      "Wi'Tech - Proposition d'Accompagnement Web",
-      "Optimisation de votre visibilité web - {{company_name}}",
-      "Bonjour {{company_name}},\n\nJe me permets de vous contacter après avoir visité votre site web ({{website}}).\n\nChez Wi'Tech Agency, nous accompagnons les entreprises dans la création de sites web modernes, ultra-performants et l'automatisation de leurs processus internes pour booster leur productivité.\n\nEn analysant rapidement votre présence en ligne, nous avons identifié des opportunités d'amélioration qui pourraient vous aider à attirer plus de clients directement depuis Google.\n\nSeriez-vous disponible pour un court appel de 10 minutes cette semaine afin d'en discuter ?\n\nExcellente journée,\n\n{{sender_signature}}"
-    );
-    
-    await db.run(
-      'INSERT INTO templates (name, subject, body) VALUES (?, ?, ?)',
-      "Wi'Tech - Automatisation de vos processus (n8n)",
-      "Gagnez 10h par semaine sur vos tâches répétitives - {{company_name}}",
-      "Bonjour {{company_name}},\n\nJe suis tombé sur votre entreprise et je me demandais comment vous gériez actuellement vos flux de données et vos tâches administratives quotidiennes.\n\nWi'Tech est spécialisée dans l'automatisation des processus métiers à l'aide d'outils performants comme n8n et Power Automate. Nous aidons les professionnels à connecter leurs outils (CRM, emails, facturation) pour éliminer les tâches manuelles répétitives.\n\nSi vous souhaitez libérer du temps pour votre cœur de métier, nous pouvons réaliser un audit gratuit de vos processus.\n\nRépondez simplement à cet email pour planifier un échange.\n\nCordialement,\n\n{{sender_signature}}"
-    );
-  }
-
-  // Migration: add user_id column to leads, templates, and campaigns for SQLite
-  const userIdColumns = [
-    { table: 'leads', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
-    { table: 'templates', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
-    { table: 'campaigns', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' }
-  ];
-
-  for (const m of userIdColumns) {
-    try {
-      await db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.colDef}`);
-    } catch (_) {
-      // Column already exists – ignore
-    }
-  }
-
-  // Backfill existing NULL user_ids to the oldest registered user (admin)
-  try {
-    const oldestUser = await db.get('SELECT id FROM users ORDER BY id ASC LIMIT 1');
-    if (oldestUser && oldestUser.id) {
-      await db.run('UPDATE leads SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
-      await db.run('UPDATE templates SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
-      await db.run('UPDATE campaigns SET user_id = ? WHERE user_id IS NULL', oldestUser.id);
-    }
-  } catch (err) {
-    console.error('Error backfilling user_id for SQLite:', err);
-  }
 }
 
 async function initPostgresDb(db) {
@@ -330,6 +97,7 @@ async function initPostgresDb(db) {
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255),
       name VARCHAR(255),
+      phone VARCHAR(50),
       role VARCHAR(50) DEFAULT 'user',
       google_id VARCHAR(255),
       apple_id VARCHAR(255),
@@ -354,12 +122,7 @@ async function initPostgresDb(db) {
       rating REAL,
       review_count INTEGER DEFAULT 0,
       address TEXT,
-      has_ssl INTEGER DEFAULT 0,
-      is_mobile_friendly INTEGER DEFAULT 0,
-      has_chat_widget INTEGER DEFAULT 0,
       social_handles TEXT,
-      load_time_ms INTEGER,
-      tech_stack VARCHAR(100),
       scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -476,6 +239,13 @@ async function initPostgresDb(db) {
     );
   }
 
+  // Migration: add phone column to users for PostgreSQL
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50)');
+  } catch (_) {
+    // Ignore if column already exists
+  }
+
   // Migration: add user_id column to leads, templates, and campaigns for PostgreSQL
   const userIdColumns = [
     { table: 'leads', colDef: 'INTEGER REFERENCES users(id) ON DELETE CASCADE' },
@@ -485,7 +255,6 @@ async function initPostgresDb(db) {
 
   for (const m of userIdColumns) {
     try {
-      // In PG we can use ADD COLUMN IF NOT EXISTS or catch the error
       await db.exec(`ALTER TABLE ${m.table} ADD COLUMN IF NOT EXISTS user_id ${m.colDef}`);
     } catch (_) {
       // Column already exists – ignore

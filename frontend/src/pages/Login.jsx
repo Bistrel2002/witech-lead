@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Zap, Mail, Lock, User, Eye, EyeOff, Globe } from 'lucide-react';
+import { Zap, Mail, Lock, User, Eye, EyeOff, Globe, Smartphone } from 'lucide-react';
 
 export default function Login({ apiHost, onLoginSuccess }) {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ export default function Login({ apiHost, onLoginSuccess }) {
     setLoading(true);
 
     const endpoint = isSignup ? '/api/auth/signup' : '/api/auth/login';
-    const payload = isSignup ? { email, password, name } : { email, password };
+    const payload = isSignup ? { email, password, name, phone } : { email, password };
 
     try {
       const res = await fetch(`${apiHost}${endpoint}`, {
@@ -75,22 +76,40 @@ export default function Login({ apiHost, onLoginSuccess }) {
           <div className="rounded-md space-y-4">
             
             {isSignup && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Nom complet</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <User className="w-5 h-5" />
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
-                    placeholder="Jean Dupont"
-                  />
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Nom complet</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <User className="w-5 h-5" />
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
+                      placeholder="Jean Dupont"
+                    />
+                  </div>
                 </div>
-              </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Téléphone (Optionnel)</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <Smartphone className="w-5 h-5" />
+                    </span>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
+                      placeholder="+33 6 12 34 56 78"
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
             <div>

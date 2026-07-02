@@ -176,6 +176,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [searchCategory, setSearchCategory] = useState('');
   const [searchCity, setSearchCity] = useState('');
   const [searchRadius, setSearchRadius] = useState(5); // default 5km
+  const [maxLeads, setMaxLeads] = useState(50);
   const [saveToDb, setSaveToDb] = useState(true);
   const [targetCampaignId, setTargetCampaignId] = useState('');
   const [campaigns, setCampaigns] = useState([]);
@@ -250,10 +251,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
   const vulnMetrics = useMemo(() => {
     const noWebsite = leads.filter(l => !l.website || l.website.trim() === '').length;
-    const noSSL = leads.filter(l => l.website && l.has_ssl === 0).length;
-    const noMobile = leads.filter(l => l.website && l.is_mobile_friendly === 0).length;
-    const noAutomation = leads.filter(l => l.website && l.has_chat_widget === 0).length;
-    return { noWebsite, noSSL, noMobile, noAutomation };
+    return { noWebsite };
   }, [leads]);
 
   const filteredLeads = useMemo(() => leads.filter(lead => {
@@ -348,7 +346,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       let payload = {};
 
       if (useRawLink) {
-        payload = { mapsUrl: googleMapsUrl };
+        payload = { mapsUrl: googleMapsUrl, maxLeads };
       } else {
         // Build optimized Google Maps search query from details
         const query = `${searchCity} ${searchCategory}`;
@@ -359,7 +357,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           city: searchCity,
           radius: searchRadius,
           saveToDb,
-          campaignId: targetCampaignId || null
+          campaignId: targetCampaignId || null,
+          maxLeads
         };
       }
 
@@ -563,12 +562,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         const fileCol = columnMappings[field.key];
         let val = fileCol ? row[fileCol] : undefined;
         
-        if (['has_ssl', 'is_mobile_friendly', 'has_chat_widget'].includes(field.key)) {
-          if (val !== undefined) {
-            const strVal = String(val).toLowerCase().trim();
-            lead[field.key] = (strVal === 'oui' || strVal === 'yes' || strVal === 'true' || strVal === '1' || val === 1 || val === true) ? 1 : 0;
-          }
-        } else if (field.key === 'rating') {
+        if (field.key === 'rating') {
           if (val !== undefined && val !== null && val !== '') lead[field.key] = parseFloat(val) || null;
         } else if (field.key === 'review_count') {
           if (val !== undefined && val !== null && val !== '') lead[field.key] = parseInt(val) || 0;
@@ -779,7 +773,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Nom', 'Catégorie', 'Ville', 'Adresse', 'Site Web', 'Email', 'Téléphone', 'Note Maps', 'Avis', 'Statut', 'SSL', 'Mobile', 'Automatisation'];
+    const headers = ['Nom', 'Catégorie', 'Ville', 'Adresse', 'Site Web', 'Email', 'Téléphone', 'Note Maps', 'Avis', 'Statut'];
     const rows = filteredLeads.map(l => [
       l.name || '',
       l.category || '',
@@ -790,10 +784,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       l.phone || '',
       l.rating || '',
       l.review_count || '',
-      l.status || '',
-      l.has_ssl ? 'Oui' : 'Non',
-      l.is_mobile_friendly ? 'Oui' : 'Non',
-      l.has_chat_widget ? 'Oui' : 'Non'
+      l.status || ''
     ]);
     const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -833,36 +824,10 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     const flags = [];
     if (!lead.website || lead.website.trim() === '') {
       flags.push({ label: 'Pas de Site', cls: 'bg-red-50 text-red-700 border-red-200', icon: Globe });
-    } else {
-      if (lead.has_ssl === 0) {
-        flags.push({ label: 'Pas de SSL', cls: 'bg-amber-50 text-amber-700 border-amber-200', icon: ShieldOff });
-      }
-      if (lead.is_mobile_friendly === 0) {
-        flags.push({ label: 'Non Mobile', cls: 'bg-blue-50 text-blue-700 border-blue-200', icon: Smartphone });
-      }
-      if (lead.has_chat_widget === 0) {
-        flags.push({ label: '0 Auto.', cls: 'bg-purple-50 text-purple-700 border-purple-200', icon: MessageSquare });
-      }
     }
     return flags;
   };
 
-  const getAuditDots = (lead) => {
-    if (!lead.website || lead.website.trim() === '') {
-      return [
-        { color: 'bg-red-500', title: 'Aucun site web' },
-        { color: 'bg-slate-300', title: 'N/A' },
-        { color: 'bg-slate-300', title: 'N/A' },
-        { color: 'bg-slate-300', title: 'N/A' }
-      ];
-    }
-    return [
-      { color: 'bg-emerald-500', title: 'Site web présent' },
-      { color: lead.has_ssl ? 'bg-emerald-500' : 'bg-red-500', title: lead.has_ssl ? 'SSL actif' : 'Pas de SSL' },
-      { color: lead.is_mobile_friendly ? 'bg-emerald-500' : 'bg-amber-500', title: lead.is_mobile_friendly ? 'Mobile-friendly' : 'Non optimisé mobile' },
-      { color: lead.has_chat_widget ? 'bg-emerald-500' : 'bg-red-500', title: lead.has_chat_widget ? 'Widget chat/booking' : 'Aucune automatisation' }
-    ];
-  };
 
   return (
     <div className="space-y-6">
@@ -963,7 +928,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
           {!useRawLink ? (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-              <div className="md:col-span-4">
+              <div className={scrapeSource === 'maps' ? 'md:col-span-3' : 'md:col-span-5'}>
                 <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Catégorie recherchée</label>
                 <input 
                   type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
@@ -972,7 +937,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   required={!useRawLink}
                 />
               </div>
-              <div className="md:col-span-4">
+              <div className={scrapeSource === 'maps' ? 'md:col-span-3' : 'md:col-span-5'}>
                 <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Ville cible</label>
                 <input 
                   type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
@@ -982,14 +947,30 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 />
               </div>
               {scrapeSource === 'maps' && (
-                <div className="md:col-span-2">
-                  <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Rayon (km)</label>
-                  <input 
-                    type="number" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
-                    min="1" max="50"
-                    value={searchRadius} onChange={(e) => setSearchRadius(parseInt(e.target.value) || 5)}
-                  />
-                </div>
+                <>
+                  <div className="md:col-span-2">
+                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Rayon (km)</label>
+                    <input 
+                      type="number" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                      min="1" max="50"
+                      value={searchRadius} onChange={(e) => setSearchRadius(parseInt(e.target.value) || 5)}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Leads</label>
+                    <select
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                      value={maxLeads} onChange={(e) => setMaxLeads(parseInt(e.target.value))}
+                    >
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                      <option value={300}>300</option>
+                      <option value={400}>400</option>
+                      <option value={500}>500</option>
+                    </select>
+                  </div>
+                </>
               )}
               <div className="md:col-span-2 flex items-end">
                 <button type="submit" className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
@@ -999,17 +980,34 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 relative">
-                <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input 
-                  type="url" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
-                  placeholder="Collez le lien Google Maps complet ici..."
-                  value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)}
-                  required={useRawLink}
-                />
+            <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="flex-1 relative w-full">
+                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Lien Google Maps</label>
+                <div className="relative">
+                  <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input 
+                    type="url" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                    placeholder="Collez le lien Google Maps complet ici..."
+                    value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)}
+                    required={useRawLink}
+                  />
+                </div>
               </div>
-              <button type="submit" className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
+              <div className="w-full sm:w-32">
+                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Leads</label>
+                <select
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  value={maxLeads} onChange={(e) => setMaxLeads(parseInt(e.target.value))}
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={300}>300</option>
+                  <option value={400}>400</option>
+                  <option value={500}>500</option>
+                </select>
+              </div>
+              <button type="submit" className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
                 {mapsScraping ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Scraper'}
               </button>
             </div>
@@ -1083,18 +1081,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-red-50 text-red-700 border border-red-100">
               <Globe className="w-3 h-3" />
               {vulnMetrics.noWebsite} sans site
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-amber-50 text-amber-700 border border-amber-100">
-              <ShieldOff className="w-3 h-3" />
-              {vulnMetrics.noSSL} sans SSL
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-              <Smartphone className="w-3 h-3" />
-              {vulnMetrics.noMobile} non mobile
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-              <MessageSquare className="w-3 h-3" />
-              {vulnMetrics.noAutomation} sans auto.
             </span>
           </div>
         </div>
@@ -1212,7 +1198,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 {/* Cards */}
                 <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[60vh] p-0.5">
                   {columnLeads.map(lead => {
-                    const auditDots = getAuditDots(lead);
                     const isDragged = draggedLeadId === lead.id;
                     return (
                       <div
@@ -1253,12 +1238,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                             <Mail className={`w-3.5 h-3.5 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
                             <Phone className={`w-3.5 h-3.5 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
                           </div>
-                          
-                          <div className="flex gap-1">
-                            {auditDots.map((dot, i) => (
-                              <span key={i} className={`w-1.5 h-1.5 rounded-full ${dot.color}`} title={dot.title}></span>
-                            ))}
-                          </div>
                         </div>
                       </div>
                     );
@@ -1298,17 +1277,12 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                     <th className="p-4">Ville</th>
                     <th className="p-4">Note Maps</th>
                     <th className="p-4">Contacts</th>
-                    <th className="p-4">Audit</th>
-                    <th className="p-4">Attributs</th>
                     <th className="p-4">Pipeline</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
                   {filteredLeads.map((lead) => {
-                    const vulnFlags = getVulnFlags(lead);
-                    const auditDots = getAuditDots(lead);
-                    
                     return (
                       <tr key={lead.id} className={`hover:bg-slate-50/50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-teal-50/20' : ''}`}>
                         <td className="p-4 text-center">
@@ -1344,35 +1318,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                             <Globe className={`w-4 h-4 ${lead.website ? 'text-teal-500' : 'text-slate-200'}`} />
                             <Mail className={`w-4 h-4 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
                             <Phone className={`w-4 h-4 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex gap-1">
-                            {auditDots.map((dot, i) => (
-                              <span key={i} className={`w-2.5 h-2.5 rounded-full ${dot.color}`} title={dot.title}></span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex gap-1.5 flex-wrap">
-                            {vulnFlags.length === 0 ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <Check className="w-2.5 h-2.5" />
-                                OK
-                              </span>
-                            ) : (
-                              vulnFlags.slice(0, 2).map((flag, i) => (
-                                <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold border ${flag.cls}`}>
-                                  <flag.icon className="w-2.5 h-2.5" />
-                                  {flag.label}
-                                </span>
-                              ))
-                            )}
-                            {vulnFlags.length > 2 && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-3xs font-semibold bg-amber-50 text-amber-700 border border-amber-200" title={vulnFlags.slice(2).map(f => f.label).join(', ')}>
-                                +{vulnFlags.length - 2}
-                              </span>
-                            )}
                           </div>
                         </td>
                         <td className="p-4">
@@ -1627,39 +1572,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </div>
               )}
 
-              {/* Digital Maturity Audit details */}
-              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
-                <h4 className="font-heading font-extrabold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wider">
-                  <Shield className="w-4 h-4 text-teal-600" />
-                  Audit & Maturité Digitale
-                </h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white border border-slate-200 rounded-lg p-3">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Certificat SSL</div>
-                    <div className={`text-xs font-semibold ${activeLeadDetails.has_ssl ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {activeLeadDetails.has_ssl ? '✓ HTTPS Actif' : '✕ Inexistant'}
-                    </div>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-lg p-3">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Optimisation Mobile</div>
-                    <div className={`text-xs font-semibold ${activeLeadDetails.is_mobile_friendly ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {activeLeadDetails.is_mobile_friendly ? '✓ Adaptatif' : '✕ Non Responsive'}
-                    </div>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-lg p-3">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Live Chat Widget</div>
-                    <div className={`text-xs font-semibold ${activeLeadDetails.has_chat_widget ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {activeLeadDetails.has_chat_widget ? '✓ Installé' : '✕ Manquant'}
-                    </div>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-lg p-3">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Stack Technique</div>
-                    <div className="text-xs font-semibold text-slate-800">
-                      {activeLeadDetails.tech_stack || 'Non détectée'}
-                    </div>
-                  </div>
-                </div>
-              </div>
+
 
               {/* Status Selector */}
               <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">

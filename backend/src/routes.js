@@ -102,17 +102,10 @@ router.all('/leads/french-db-lookup', async (req, res) => {
     // Check if french_businesses table exists
     let hasTable = true;
     try {
-      if (fDb.isPg) {
-        const check = await fDb.get(
-          "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'french_businesses')"
-        );
-        hasTable = check.exists;
-      } else {
-        const check = await fDb.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='french_businesses'"
-        );
-        hasTable = !!check;
-      }
+      const check = await fDb.get(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'french_businesses')"
+      );
+      hasTable = check.exists;
     } catch (_) {
       hasTable = false;
     }
@@ -134,10 +127,6 @@ router.all('/leads/french-db-lookup', async (req, res) => {
     }
 
     query += ` LIMIT ${lim}`;
-    
-    if (!fDb.isPg) {
-      query = query.replace(/ILIKE/g, 'LIKE');
-    }
 
     const businesses = await fDb.all(query, ...params);
     
@@ -159,13 +148,11 @@ router.all('/leads/french-db-lookup', async (req, res) => {
         const insertRes = await db.run(
           `INSERT INTO leads (
             user_id, name, category, website, phone, email, google_maps_url, city, notes, status, 
-            rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
-            social_handles, load_time_ms, tech_stack
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            rating, review_count, address, social_handles
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           req.user.id, biz.name, biz.category, biz.website, biz.phone, biz.email, biz.google_maps_url, 
           biz.city, biz.notes || 'Prospect issu de la base nationale.', 'New', biz.rating || null, biz.review_count || 0, biz.address || null,
-          biz.has_ssl || 0, biz.is_mobile_friendly || 0, biz.has_chat_widget || 0,
-          biz.social_handles || '{}', biz.load_time_ms || null, biz.tech_stack || null
+          biz.social_handles || '{}'
         );
         targetLead = await db.get('SELECT * FROM leads WHERE id = ?', insertRes.lastID);
       }
@@ -422,7 +409,7 @@ router.get('/leads/export/csv', async (req, res) => {
     const leads = await db.all(query, ...params);
 
     // Build CSV
-    const csvHeaders = 'Nom,Catégorie,Ville,Site Web,Email,Téléphone,Adresse,Note,Statut,SSL,Mobile';
+    const csvHeaders = 'Nom,Catégorie,Ville,Site Web,Email,Téléphone,Adresse,Note,Statut';
     const escapeCSV = (val) => {
       if (val == null) return '';
       const str = String(val);
@@ -441,9 +428,7 @@ router.get('/leads/export/csv', async (req, res) => {
         escapeCSV(l.phone),
         escapeCSV(l.address),
         escapeCSV(l.rating),
-        escapeCSV(l.status),
-        l.has_ssl ? 'Oui' : 'Non',
-        l.is_mobile_friendly ? 'Oui' : 'Non'
+        escapeCSV(l.status)
       ].join(',')
     );
 
@@ -459,7 +444,7 @@ router.get('/leads/export/csv', async (req, res) => {
 
 // Create lead
 router.post('/leads', async (req, res) => {
-  const { name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack } = req.body;
+  const { name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles } = req.body;
   if (!name || !category) {
     return res.status(400).json({ error: 'Name and Category are required' });
   }
@@ -482,9 +467,9 @@ router.post('/leads', async (req, res) => {
     }
 
     const result = await db.run(
-      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, has_ssl || 0, is_mobile_friendly || 0, has_chat_widget || 0, social_handles || null, load_time_ms || null, tech_stack || null
+      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, social_handles || null
     );
     const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
     res.status(201).json(newLead);
@@ -496,7 +481,7 @@ router.post('/leads', async (req, res) => {
 // Update lead
 router.put('/leads/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, category, website, phone, email, status, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack } = req.body;
+  const { name, category, website, phone, email, status, city, notes, rating, review_count, address, social_handles } = req.body;
 
   try {
     const db = await getDb();
@@ -510,10 +495,9 @@ router.put('/leads/:id', async (req, res) => {
     await db.run(
       `UPDATE leads 
        SET name = ?, category = ?, website = ?, phone = ?, email = ?, status = ?, city = ?, notes = ?,
-           rating = ?, review_count = ?, address = ?, has_ssl = ?, is_mobile_friendly = ?,
-           has_chat_widget = ?, social_handles = ?, load_time_ms = ?, tech_stack = ?
+           rating = ?, review_count = ?, address = ?, social_handles = ?
        WHERE id = ? AND user_id = ?`,
-      name, category, website, phone, email, status, city, notes, rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, social_handles, load_time_ms, tech_stack, id, req.user.id
+      name, category, website, phone, email, status, city, notes, rating, review_count, address, social_handles, id, req.user.id
     );
     const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', id);
     res.json(updatedLead);
@@ -657,10 +641,9 @@ router.post('/leads/import', async (req, res) => {
       const result = await db.run(
         `INSERT INTO leads (
           user_id, name, category, website, phone, email, google_maps_url, city, notes, status,
-          rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget,
-          social_handles, load_time_ms, tech_stack
+          rating, review_count, address, social_handles
         ) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         req.user.id,
         lead.name,
         lead.category,
@@ -674,12 +657,7 @@ router.post('/leads/import', async (req, res) => {
         lead.rating !== undefined ? lead.rating : null,
         lead.review_count !== undefined ? lead.review_count : 0,
         lead.address || null,
-        lead.has_ssl !== undefined ? lead.has_ssl : 0,
-        lead.is_mobile_friendly !== undefined ? lead.is_mobile_friendly : 0,
-        lead.has_chat_widget !== undefined ? lead.has_chat_widget : 0,
-        socialHandlesVal || null,
-        lead.load_time_ms !== undefined ? lead.load_time_ms : null,
-        lead.tech_stack || null
+        socialHandlesVal || null
       );
       
       const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
@@ -702,14 +680,14 @@ router.post('/leads/import', async (req, res) => {
 
 // Scrape and import from Google Maps Link directly, filtering out non-website and categorizing
 router.post('/leads/scrape-maps-link', async (req, res) => {
-  const { mapsUrl, category, city, radius, saveToDb, campaignId } = req.body;
+  const { mapsUrl, category, city, radius, saveToDb, campaignId, maxLeads } = req.body;
   if (!mapsUrl) {
     return res.status(400).json({ error: 'Un lien Google Maps est requis' });
   }
 
   try {
     const db = await getDb();
-    const result = await scrapeGoogleMapsFromLink(mapsUrl, category, city, radius);
+    const result = await scrapeGoogleMapsFromLink(mapsUrl, category, city, radius, maxLeads);
     const finalCategory = result.category;
     const finalCity = result.city;
     const leads = result.leads;
@@ -731,13 +709,11 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
         const insertRes = await db.run(
           `INSERT INTO leads (
             user_id, name, category, website, phone, email, google_maps_url, city, notes, status, 
-            rating, review_count, address, has_ssl, is_mobile_friendly, has_chat_widget, 
-            social_handles, load_time_ms, tech_stack
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            rating, review_count, address, social_handles
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           req.user.id, lead.name, lead.category, lead.website, lead.phone, lead.email, lead.google_maps_url, 
           lead.city, lead.notes, 'New', lead.rating || null, lead.review_count || 0, lead.address || null,
-          lead.has_ssl || 0, lead.is_mobile_friendly || 0, lead.has_chat_widget || 0,
-          lead.social_handles || '{}', lead.load_time_ms || null, lead.tech_stack || null
+          lead.social_handles || '{}'
         );
         targetLead = await db.get('SELECT * FROM leads WHERE id = ?', insertRes.lastID);
       }
@@ -825,26 +801,18 @@ router.post('/leads/:id/scrape', async (req, res) => {
     const crawlerLog = `\n[System Crawler Log ${new Date().toLocaleDateString()}]: Crawled pages: ${scrapedData.pagesCrawled.join(', ')}.`;
     const newNotes = (lead.notes || '') + crawlerLog;
 
-    // Update lead in SQLite with enrichment data
+    // Update lead in database with enrichment data
     await db.run(
       `UPDATE leads 
        SET email = COALESCE(?, email), 
            phone = COALESCE(?, phone),
            notes = ?,
-           has_ssl = ?,
-           social_handles = COALESCE(?, social_handles),
-           has_chat_widget = ?,
-           tech_stack = COALESCE(?, tech_stack),
-           load_time_ms = ?
+           social_handles = COALESCE(?, social_handles)
        WHERE id = ? AND user_id = ?`,
       scrapedData.email,
       scrapedData.phone,
       newNotes,
-      scrapedData.has_ssl,
       scrapedData.social_handles,
-      scrapedData.has_chat_widget,
-      scrapedData.tech_stack,
-      scrapedData.load_time_ms,
       id,
       req.user.id
     );
@@ -1049,7 +1017,7 @@ router.post('/campaigns/:id/start', async (req, res) => {
     }
 
     // Update status to Active
-    await db.run('UPDATE campaigns SET status = "Active" WHERE id = ? AND user_id = ?', id, req.user.id);
+    await db.run("UPDATE campaigns SET status = 'Active' WHERE id = ? AND user_id = ?", id, req.user.id);
     
     // Trigger in the background
     runCampaignBackground(parseInt(id));
@@ -1070,8 +1038,49 @@ router.post('/campaigns/:id/pause', async (req, res) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    await db.run('UPDATE campaigns SET status = "Paused" WHERE id = ? AND user_id = ?', id, req.user.id);
+    await db.run("UPDATE campaigns SET status = 'Paused' WHERE id = ? AND user_id = ?", id, req.user.id);
     res.json({ message: 'Campaign paused' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Restart/Retry failed or completed campaign
+router.post('/campaigns/:id/restart', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await getDb();
+    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    if (campaign.status === 'Completed') {
+      // Restart completely from scratch
+      await db.run(
+        "UPDATE campaign_logs SET status = 'Pending', error_message = NULL WHERE campaign_id = ?",
+        id
+      );
+      await db.run(
+        "UPDATE campaigns SET status = 'Active', sent_count = 0, failed_count = 0 WHERE id = ? AND user_id = ?",
+        id, req.user.id
+      );
+    } else {
+      // Retry failed logs
+      await db.run(
+        "UPDATE campaign_logs SET status = 'Pending', error_message = NULL WHERE campaign_id = ? AND status = 'Failed'",
+        id
+      );
+      await db.run(
+        "UPDATE campaigns SET status = 'Active', failed_count = 0 WHERE id = ? AND user_id = ?",
+        id, req.user.id
+      );
+    }
+
+    // Trigger background process
+    runCampaignBackground(parseInt(id));
+
+    res.json({ message: 'Campaign restarted in background' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

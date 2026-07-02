@@ -10,7 +10,8 @@ import {
   X,
   LogOut,
   Shield,
-  Users
+  Users,
+  Smartphone
 } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
@@ -39,12 +40,7 @@ const INITIAL_FALLBACK_LEADS = [
     address: '45 Rue de Rivoli, 75001 Paris',
     rating: 4.6,
     review_count: 87,
-    has_ssl: 1,
-    is_mobile_friendly: 1,
-    has_chat_widget: 1,
     social_handles: JSON.stringify({ facebook: 'https://facebook.com/milletplomberie', instagram: null, linkedin: null }),
-    tech_stack: 'WordPress',
-    load_time_ms: 1200,
     notes: 'Prospect sans email identifié sur Google Maps. Cliquez sur le globe pour crawler son site internet !',
     scraped_at: new Date(Date.now() - 3600000 * 2).toISOString()
   },
@@ -61,12 +57,7 @@ const INITIAL_FALLBACK_LEADS = [
     address: '12 Rue de la République, 69001 Lyon',
     rating: 4.8,
     review_count: 142,
-    has_ssl: 0,
-    is_mobile_friendly: 0,
-    has_chat_widget: 0,
     social_handles: null,
-    tech_stack: 'Wix',
-    load_time_ms: 3800,
     notes: 'Prospect très intéressé par une automatisation de facturation sous n8n. Réponse reçue hier.',
     scraped_at: new Date(Date.now() - 3600000 * 24).toISOString()
   },
@@ -83,12 +74,7 @@ const INITIAL_FALLBACK_LEADS = [
     address: '8 Cours Julien, 13006 Marseille',
     rating: 3.9,
     review_count: 34,
-    has_ssl: 0,
-    is_mobile_friendly: 0,
-    has_chat_widget: 0,
     social_handles: JSON.stringify({ facebook: null, instagram: 'https://instagram.com/studiocoiffuredesign', linkedin: null }),
-    tech_stack: null,
-    load_time_ms: null,
     notes: 'Pas de site web — Cible directe pour proposition web design Wi\'Tech.',
     scraped_at: new Date(Date.now() - 3600000 * 72).toISOString()
   },
@@ -105,12 +91,7 @@ const INITIAL_FALLBACK_LEADS = [
     address: '22 Rue Sainte-Catherine, 33000 Bordeaux',
     rating: 4.2,
     review_count: 56,
-    has_ssl: 1,
-    is_mobile_friendly: 1,
-    has_chat_widget: 0,
     social_handles: JSON.stringify({ facebook: 'https://facebook.com/compagnons-ebenistes', instagram: null, linkedin: 'https://linkedin.com/company/compagnons-ebenistes' }),
-    tech_stack: 'Squarespace',
-    load_time_ms: 1800,
     notes: 'Prospect qualifié. Site correct mais aucune automatisation détectée — Cible pour n8n.',
     scraped_at: new Date().toISOString()
   }
@@ -126,6 +107,50 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [path, setPath] = useState(window.location.pathname);
+
+  // Phone Prompt states
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+  const [promptPhone, setPromptPhone] = useState('');
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptError, setPromptError] = useState(null);
+
+  useEffect(() => {
+    if (user && !user.phone && !localStorage.getItem('witech_skip_phone_prompt')) {
+      setShowPhonePrompt(true);
+    } else {
+      setShowPhonePrompt(false);
+    }
+  }, [user]);
+
+  const handleSavePhonePrompt = async (e) => {
+    e.preventDefault();
+    if (!promptPhone.trim()) return;
+    setPromptSaving(true);
+    setPromptError(null);
+    try {
+      const res = await fetch(`${API_HOST}/api/auth/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: user.name, email: user.email, phone: promptPhone.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUser(data.user);
+        setShowPhonePrompt(false);
+      } else {
+        setPromptError(data.error || 'Erreur lors de la mise à jour.');
+      }
+    } catch (err) {
+      setPromptError('Impossible de contacter le serveur.');
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
+  const handleSkipPhonePrompt = () => {
+    localStorage.setItem('witech_skip_phone_prompt', 'true');
+    setShowPhonePrompt(false);
+  };
 
   // Sync route path
   useEffect(() => {
@@ -248,6 +273,7 @@ export default function App() {
             apiHost={API_HOST} 
             leads={leads} 
             reloadLeads={loadLeadsFromApi} 
+            currentUser={user}
           />
         );
       case 'settings':
@@ -256,6 +282,8 @@ export default function App() {
             apiHost={API_HOST} 
             leads={leads} 
             reloadLeads={loadLeadsFromApi} 
+            currentUser={user}
+            setCurrentUser={setUser}
           />
         );
       default:
@@ -412,6 +440,63 @@ export default function App() {
           renderActivePage()
         )}
       </div>
+
+      {/* Optional Phone Onboarding Modal */}
+      {showPhonePrompt && (
+        <div className="fixed inset-0 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm z-[999] p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl max-w-md w-full animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-2 mb-4 text-teal-600">
+              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-teal-500/10 shadow-sm">
+                <Smartphone className="w-5 h-5 text-teal-600" />
+              </div>
+              <div>
+                <h3 className="font-heading font-extrabold text-slate-900 text-lg">Onboarding : Profil</h3>
+                <p className="text-slate-500 text-xs mt-0.5">Complétez votre compte</p>
+              </div>
+            </div>
+            
+            <p className="text-slate-600 text-sm mb-4 leading-relaxed">
+              Ajoutez votre numéro de téléphone afin que vos campagnes de prospection (SMS, WhatsApp, signatures) puissent y faire référence dynamiquement !
+            </p>
+
+            {promptError && (
+              <p className="bg-red-50 text-red-600 text-xs p-3 rounded-lg font-semibold mb-4 border border-red-100">{promptError}</p>
+            )}
+
+            <form onSubmit={handleSavePhonePrompt} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Numéro de téléphone</label>
+                <input 
+                  type="tel" 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={promptPhone}
+                  onChange={(e) => setPromptPhone(e.target.value)}
+                  placeholder="Ex: +33 6 12 34 56 78"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button 
+                  type="button" 
+                  className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all"
+                  onClick={handleSkipPhonePrompt}
+                  disabled={promptSaving}
+                >
+                  Plus tard
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all shadow-sm shadow-teal-600/15"
+                  disabled={promptSaving || !promptPhone.trim()}
+                >
+                  {promptSaving ? 'Enregistrement...' : 'Enregistrer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

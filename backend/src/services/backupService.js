@@ -133,23 +133,13 @@ export async function runSecureBackup() {
     const secret = new fernet.Secret(fernetKey);
 
     // 3. Generate Database Dump
-    if (db.isPg) {
-      console.log("BackupService: Generating pg_dump for PostgreSQL...");
-      // Fetch connection URL parts
-      const pgUrl = process.env.DATABASE_URL || secrets.DATABASE_URL;
-      if (!pgUrl) throw new Error("Postgres connection string missing.");
-      
-      // Execute pg_dump
-      await execPromise(`pg_dump "${pgUrl}" -f "${plainDumpPath}"`);
-    } else {
-      console.log("BackupService: Generating SQLite backup...");
-      // For SQLite, a simple file copy acts as the dump
-      const sqlitePath = path.resolve(__dirname, '../../../database.sqlite');
-      if (!fs.existsSync(sqlitePath)) {
-        throw new Error("SQLite database file not found.");
-      }
-      fs.copyFileSync(sqlitePath, plainDumpPath);
-    }
+    console.log("BackupService: Generating pg_dump for PostgreSQL...");
+    // Fetch connection URL parts
+    const pgUrl = process.env.DATABASE_URL || secrets.DATABASE_URL;
+    if (!pgUrl) throw new Error("Postgres connection string missing.");
+    
+    // Execute pg_dump
+    await execPromise(`pg_dump "${pgUrl}" -f "${plainDumpPath}"`);
 
     // 4. Integrity Validation (Pre-Encryption SHA-256)
     const plainHash = await getFileSha256(plainDumpPath);
@@ -180,7 +170,7 @@ export async function runSecureBackup() {
     const metadata = {
       timestamp: new Date().toISOString(),
       backup_name: backupName,
-      db_type: db.isPg ? 'PostgreSQL' : 'SQLite',
+      db_type: 'PostgreSQL',
       hash_avant_chiffrement: plainHash,
       taille_avant_chiffrement: plainSize,
       hash_apres_chiffrement: encHash,
@@ -286,25 +276,12 @@ export async function runSecureRestore(backupName) {
     console.log("BackupService: Check 2 PASSED.");
 
     // Restore Database via Client CLI
-    if (db.isPg) {
-      console.log("BackupService: Restoring PostgreSQL database...");
-      const pgUrl = process.env.DATABASE_URL || secrets.DATABASE_URL;
-      if (!pgUrl) throw new Error("Postgres connection URL missing.");
-      
-      // psql restore
-      await execPromise(`psql "${pgUrl}" -f "${plainDumpPath}"`);
-    } else {
-      console.log("BackupService: Restoring SQLite database...");
-      const sqlitePath = path.resolve(__dirname, '../../../database.sqlite');
-      
-      // Close active database handle before overwriting file
-      if (global.dbInstanceCon) {
-        await global.dbInstanceCon.close();
-        global.dbInstanceCon = null;
-      }
-      
-      fs.copyFileSync(plainDumpPath, sqlitePath);
-    }
+    console.log("BackupService: Restoring PostgreSQL database...");
+    const pgUrl = process.env.DATABASE_URL || secrets.DATABASE_URL;
+    if (!pgUrl) throw new Error("Postgres connection URL missing.");
+    
+    // psql restore
+    await execPromise(`psql "${pgUrl}" -f "${plainDumpPath}"`);
 
     // Check 3: Query & Verify Live Row Counts
     console.log("BackupService: Verification Check 3 (Row Count Integrity)...");

@@ -10,7 +10,7 @@ const router = express.Router();
 // JWT helper
 const generateToken = (user) => {
   return jwt.sign(
-    { id: user.id, email: user.email, name: user.name, role: user.role },
+    { id: user.id, email: user.email, name: user.name, role: user.role, phone: user.phone },
     process.env.JWT_SECRET || 'witech-secret',
     { expiresIn: '7d' }
   );
@@ -18,7 +18,7 @@ const generateToken = (user) => {
 
 // SIGNUP Endpoint
 router.post('/signup', async (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, password, name, phone } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'Tous les champs sont requis.' });
   }
@@ -38,11 +38,11 @@ router.post('/signup', async (req, res) => {
     const role = (Number(userCount.count) === 0) ? 'admin' : 'user';
 
     const result = await db.run(
-      'INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
-      email, passwordHash, name, role
+      'INSERT INTO users (email, password_hash, name, role, phone) VALUES (?, ?, ?, ?, ?)',
+      email, passwordHash, name, role, phone || null
     );
 
-    const user = { id: result.lastID, email, name, role };
+    const user = { id: result.lastID, email, name, role, phone: phone || null };
     const token = generateToken(user);
 
     res.cookie('auth_token', token, {
@@ -91,7 +91,8 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: user.role,
+        phone: user.phone
       }
     });
   } catch (error) {
@@ -108,6 +109,41 @@ router.post('/logout', (req, res) => {
 // ME Endpoint (Returns current active user)
 router.get('/me', authenticateUser, (req, res) => {
   res.json({ user: req.user });
+});
+
+// Update Profile Endpoint
+router.put('/profile', authenticateUser, async (req, res) => {
+  const { name, email, phone } = req.body;
+  if (!email || !name) {
+    return res.status(400).json({ error: 'Le nom et l\'adresse email sont requis.' });
+  }
+
+  try {
+    const db = await getDb();
+    const existing = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, req.user.id);
+    if (existing) {
+      return res.status(400).json({ error: 'Cette adresse e-mail est déjà utilisée par un autre compte.' });
+    }
+
+    await db.run(
+      'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
+      name, email, phone || null, req.user.id
+    );
+
+    const updatedUser = await db.get('SELECT id, email, name, role, phone FROM users WHERE id = ?', req.user.id);
+    const token = generateToken(updatedUser);
+
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 7 * 24 * 3600 * 1000
+    });
+
+    res.json({ user: updatedUser, token });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ==========================================

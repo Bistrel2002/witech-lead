@@ -19,7 +19,7 @@ import {
   Smartphone
 } from 'lucide-react';
 
-export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
+export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
   const [templates, setTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [activeTab, setActiveTab] = useState('templates'); // templates, new-campaign, history
@@ -99,13 +99,14 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
     if (!text || !lead) return '';
     let compiled = text;
     
-    const signature = "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com";
+    const signature = currentUser?.sender_signature || "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com";
     const replacements = {
       company_name: lead.name || 'votre entreprise',
       website: lead.website || 'votre site internet',
       phone: lead.phone || 'votre numéro',
       city: lead.city || 'votre ville',
-      sender_name: "Wi'Tech Agency",
+      sender_name: currentUser?.name || "Wi'Tech Agency",
+      sender_phone: currentUser?.phone || '',
       sender_signature: signature
     };
 
@@ -135,11 +136,23 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
   useEffect(() => {
     if (newCampaign.category) {
       const targets = leads.filter(l => {
-        const hasCategory = l.category === newCampaign.category;
-        if (newCampaign.channel === 'email') {
-          return hasCategory && l.email && l.email.trim() !== '';
+        let isSegmentMatch = false;
+        if (newCampaign.category === '__WITH_WEBSITE__') {
+          isSegmentMatch = !!(l.website && l.website.trim() !== '');
+        } else if (newCampaign.category === '__WITHOUT_WEBSITE__') {
+          isSegmentMatch = !(l.website && l.website.trim() !== '');
+        } else if (newCampaign.category === '__WITH_EMAIL__') {
+          isSegmentMatch = !!(l.email && l.email.trim() !== '');
+        } else if (newCampaign.category === '__WITHOUT_EMAIL__') {
+          isSegmentMatch = !(l.email && l.email.trim() !== '');
         } else {
-          return hasCategory && l.phone && l.phone.trim() !== '';
+          isSegmentMatch = l.category === newCampaign.category;
+        }
+
+        if (newCampaign.channel === 'email') {
+          return isSegmentMatch && l.email && l.email.trim() !== '';
+        } else {
+          return isSegmentMatch && l.phone && l.phone.trim() !== '';
         }
       });
       setCampaignPreviewLeads(targets);
@@ -200,15 +213,23 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
     }
 
     try {
+      const isVirtual = ['__WITH_WEBSITE__', '__WITHOUT_WEBSITE__', '__WITH_EMAIL__', '__WITHOUT_EMAIL__'].includes(newCampaign.category);
+      const payload = {
+        name: newCampaign.name,
+        template_id: parseInt(newCampaign.template_id),
+        channel: newCampaign.channel
+      };
+
+      if (isVirtual) {
+        payload.lead_ids = campaignPreviewLeads.map(l => l.id);
+      } else {
+        payload.category = newCampaign.category;
+      }
+
       const res = await fetch(`${apiHost}/api/campaigns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newCampaign.name,
-          template_id: parseInt(newCampaign.template_id),
-          category: newCampaign.category,
-          channel: newCampaign.channel
-        })
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
@@ -268,6 +289,17 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
   const handleResumeCampaign = async (id) => {
     try {
       const res = await fetch(`${apiHost}/api/campaigns/${id}/start`, { method: 'POST' });
+      if (res.ok) {
+        viewCampaignDetails(id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRestartCampaign = async (id) => {
+    try {
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/restart`, { method: 'POST' });
       if (res.ok) {
         viewCampaignDetails(id);
       }
@@ -380,7 +412,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Corps du Message *</label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_signature'].map(tag => (
+                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature'].map(tag => (
                       <span 
                         key={tag} 
                         className="bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg px-2 py-1 text-2xs text-teal-700 font-mono cursor-pointer transition-colors"
@@ -503,21 +535,57 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                   value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
                 >
                   <option value="">-- Sélectionnez une catégorie --</option>
-                  {uniqueCategoriesWithContacts.map(c => {
-                    const count = leads.filter(l => {
-                      const hasCat = l.category === c;
-                      if (newCampaign.channel === 'email') {
-                        return hasCat && l.email && l.email.trim() !== '';
-                      } else {
-                        return hasCat && l.phone && l.phone.trim() !== '';
-                      }
-                    }).length;
-                    return (
-                      <option key={c} value={c}>
-                        {c} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'} qualifiés)
-                      </option>
-                    );
-                  })}
+                  
+                  <optgroup label="Segments Globaux (Tous métiers)">
+                    {[
+                      { key: '__WITH_WEBSITE__', label: 'Avec Site internet' },
+                      { key: '__WITHOUT_WEBSITE__', label: 'Sans Site internet' },
+                      { key: '__WITH_EMAIL__', label: 'Avec Adresse Email' },
+                      { key: '__WITHOUT_EMAIL__', label: 'Sans Adresse Email' }
+                    ].map(seg => {
+                      const count = leads.filter(l => {
+                        let matchesSegment = false;
+                        if (seg.key === '__WITH_WEBSITE__') {
+                          matchesSegment = !!(l.website && l.website.trim() !== '');
+                        } else if (seg.key === '__WITHOUT_WEBSITE__') {
+                          matchesSegment = !(l.website && l.website.trim() !== '');
+                        } else if (seg.key === '__WITH_EMAIL__') {
+                          matchesSegment = !!(l.email && l.email.trim() !== '');
+                        } else if (seg.key === '__WITHOUT_EMAIL__') {
+                          matchesSegment = !(l.email && l.email.trim() !== '');
+                        }
+                        
+                        if (newCampaign.channel === 'email') {
+                          return matchesSegment && l.email && l.email.trim() !== '';
+                        } else {
+                          return matchesSegment && l.phone && l.phone.trim() !== '';
+                        }
+                      }).length;
+                      return (
+                        <option key={seg.key} value={seg.key}>
+                          {seg.label} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'} qualifiés)
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+
+                  <optgroup label="Catégories Professionnelles">
+                    {uniqueCategoriesWithContacts.map(c => {
+                      const count = leads.filter(l => {
+                        const hasCat = l.category === c;
+                        if (newCampaign.channel === 'email') {
+                          return hasCat && l.email && l.email.trim() !== '';
+                        } else {
+                          return hasCat && l.phone && l.phone.trim() !== '';
+                        }
+                      }).length;
+                      return (
+                        <option key={c} value={c}>
+                          {c} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'} qualifiés)
+                        </option>
+                      );
+                    })}
+                  </optgroup>
                 </select>
               </div>
 
@@ -768,8 +836,9 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads }) {
                     Reprendre
                   </button>
                 ) : (
-                  <button className="flex-grow inline-flex items-center justify-center px-3 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-400 font-semibold text-xs cursor-not-allowed" disabled>
-                    Campagne Terminée
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs hover:bg-amber-700 transition-colors" onClick={() => handleRestartCampaign(selectedCampaignDetails.campaign.id)}>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Relancer la Campagne
                   </button>
                 )}
               </div>

@@ -52,6 +52,7 @@ export function compileTemplate(text, data) {
     phone: data.phone || 'votre numéro',
     city: data.city || 'votre ville',
     sender_name: data.sender_name || "Wi'Tech Agency",
+    sender_phone: data.sender_phone || '',
     sender_signature: data.sender_signature || "Cordialement,\nL'équipe Wi'Tech"
   };
 
@@ -76,9 +77,13 @@ export async function runCampaignBackground(campaignId) {
   const db = await getDb();
   
   try {
-    // 1. Fetch Campaign and its Template
+    // 1. Fetch Campaign, its Template, and its Owner
     const campaign = await db.get(
-      'SELECT c.*, t.subject, t.body FROM campaigns c JOIN templates t ON c.template_id = t.id WHERE c.id = ?',
+      `SELECT c.*, t.subject, t.body, u.name as user_name, u.email as user_email, u.phone as user_phone 
+       FROM campaigns c 
+       JOIN templates t ON c.template_id = t.id 
+       LEFT JOIN users u ON c.user_id = u.id 
+       WHERE c.id = ?`,
       campaignId
     );
 
@@ -122,14 +127,14 @@ export async function runCampaignBackground(campaignId) {
     `, campaignId);
 
     if (prospects.length === 0) {
-      await db.run('UPDATE campaigns SET status = "Completed" WHERE id = ?', campaignId);
+      await db.run("UPDATE campaigns SET status = 'Completed' WHERE id = ?", campaignId);
       activeCampaignRuns.delete(campaignId);
       return;
     }
 
     // 4. Update campaign status to Active
     await db.run(
-      'UPDATE campaigns SET status = "Active", total_leads = ? WHERE id = ?',
+      'UPDATE campaigns SET status = \'Active\', total_leads = ? WHERE id = ?',
       prospects.length,
       campaignId
     );
@@ -184,7 +189,8 @@ export async function runCampaignBackground(campaignId) {
           website: prospect.website,
           phone: prospect.phone,
           city: prospect.city,
-          sender_name: settings.smtp_name,
+          sender_name: campaign.user_name || settings.smtp_name || "Wi'Tech Agency",
+          sender_phone: campaign.user_phone || '',
           sender_signature: settings.sender_signature
         };
 
@@ -253,12 +259,12 @@ export async function runCampaignBackground(campaignId) {
     // Complete campaign run
     const finalCampaignState = await db.get('SELECT status FROM campaigns WHERE id = ?', campaignId);
     if (finalCampaignState.status === 'Active') {
-      await db.run('UPDATE campaigns SET status = "Completed" WHERE id = ?', campaignId);
+      await db.run("UPDATE campaigns SET status = 'Completed' WHERE id = ?", campaignId);
     }
 
   } catch (error) {
     console.error(`CampaignService: Fatal error in campaign ID ${campaignId}:`, error.message);
-    await db.run('UPDATE campaigns SET status = "Failed" WHERE id = ?', campaignId);
+    await db.run("UPDATE campaigns SET status = 'Failed' WHERE id = ?", campaignId);
   } finally {
     activeCampaignRuns.delete(campaignId);
   }

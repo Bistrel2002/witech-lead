@@ -14,7 +14,7 @@ import {
   Phone
 } from 'lucide-react';
 
-export default function Settings({ apiHost, leads = [], reloadLeads }) {
+export default function Settings({ apiHost, leads = [], reloadLeads, currentUser, setCurrentUser }) {
   const [settings, setSettings] = useState({
     smtp_host: '',
     smtp_port: '587',
@@ -30,6 +30,26 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
     twilio_phone_number: '',
     twilio_whatsapp_number: ''
   });
+
+  // User Profile States
+  const [profileForm, setProfileForm] = useState({
+    name: currentUser?.name || '',
+    email: currentUser?.email || '',
+    phone: currentUser?.phone || ''
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState(null);
+
+  // Sync profile form when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      setProfileForm({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        phone: currentUser.phone || ''
+      });
+    }
+  }, [currentUser]);
 
   // Action states
   const [saving, setSaving] = useState(false);
@@ -56,6 +76,33 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
 
   const handleInputChange = (key, val) => {
     setSettings(prev => ({ ...prev, [key]: val }));
+  };
+
+  // Save profile modifications
+  const handleSaveProfile = async (e) => {
+    if (e) e.preventDefault();
+    setProfileSaving(true);
+    setProfileError(null);
+    try {
+      const res = await fetch(`${apiHost}/api/auth/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileForm)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCurrentUser(data.user);
+        alert("✔️ Votre profil a été mis à jour avec succès !");
+      } else {
+        setProfileError(data.error || 'Erreur lors de la mise à jour.');
+        alert(data.error || 'Erreur lors de la mise à jour.');
+      }
+    } catch (err) {
+      console.error(err);
+      setProfileError('Impossible de contacter le serveur.');
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   // Save configurations in SQLite
@@ -349,11 +396,62 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
         </div>
 
         {/* Agency profiles & backups */}
-        <div className="lg:col-span-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 h-full flex flex-col justify-between">
+        <div className="lg:col-span-4 space-y-6">
+          {/* User Profile Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
             <div className="space-y-4 w-full">
               <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-2 flex items-center gap-2">
                 <User className="w-5 h-5 text-teal-600" />
+                Mon Profil
+              </h3>
+
+              {profileError && (
+                <p className="bg-red-50 text-red-600 text-xs p-3 rounded-lg font-semibold border border-red-100">{profileError}</p>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom complet *</label>
+                <input 
+                  type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Adresse E-mail *</label>
+                <input 
+                  type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Numéro de téléphone (Optionnel)</label>
+                <input 
+                  type="tel" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  value={profileForm.phone} onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                  placeholder="+33 6 12 34 56 78"
+                />
+              </div>
+            </div>
+
+            <button 
+              type="button" 
+              className="w-full mt-6 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150"
+              onClick={handleSaveProfile}
+              disabled={profileSaving}
+            >
+              {profileSaving ? 'Sauvegarde...' : 'Sauvegarder le Profil'}
+            </button>
+          </div>
+
+          {/* Agency Settings Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+            <div className="space-y-4 w-full">
+              <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-2 flex items-center gap-2">
+                <SettingsIcon className="w-5 h-5 text-teal-600" />
                 Profil Wi'Tech Agency
               </h3>
 
@@ -387,7 +485,7 @@ export default function Settings({ apiHost, leads = [], reloadLeads }) {
               className="w-full mt-6 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150"
               onClick={handleSaveSettings}
             >
-              Sauvegarder le Profil
+              Sauvegarder les Paramètres
             </button>
           </div>
         </div>

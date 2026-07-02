@@ -214,7 +214,7 @@ export async function scrapeWebsite(websiteUrl) {
 /**
  * Spawns the Python Playwright Google Maps scraper process
  */
-export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius = 5) {
+export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius = 5, maxLeads = 50) {
   let finalCategory = category;
   let finalCity = city;
 
@@ -240,10 +240,9 @@ export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius =
     }
   }
 
-  if (!finalCategory) finalCategory = 'Entreprise';
-  if (!finalCity) finalCity = 'France';
 
-  console.log(`[Node backend]: Spawning Playwright Python Scraper for Category: "${finalCategory}", City: "${finalCity}"`);
+
+  console.log(`[Node backend]: Spawning Playwright Python Scraper for Category: "${finalCategory}", City: "${finalCity}", Limit: ${maxLeads}`);
 
   const pythonBin = path.resolve(__dirname, '../../../venv/bin/python3');
   const pythonScript = path.resolve(__dirname, './scraper.py');
@@ -255,7 +254,8 @@ export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius =
         pythonScript,
         '--category', finalCategory,
         '--city', finalCity,
-        '--radius', String(radius)
+        '--radius', String(radius),
+        '--limit', String(maxLeads)
       ]);
     } catch (err) {
       return reject(new Error(`Impossible de lancer le scraper : ${err.message}`));

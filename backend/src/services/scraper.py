@@ -15,7 +15,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Google Maps Business Lead Scraper")
     parser.add_argument("--category", type=str, required=True, help="Category of business (e.g. Plombier)")
     parser.add_argument("--city", type=str, required=True, help="City in France (e.g. Nantes)")
-    parser.add_argument("--radius", type=int, default=5, help="Radius in kilometers (for logging)")
+    parser.add_argument("--radius", type=int, default=5, help="Radius in kilometers")
+    parser.add_argument("--limit", type=int, default=50, help="Max number of leads to scrape")
     return parser.parse_args()
 
 def clean_social_url(url):
@@ -30,12 +31,7 @@ def clean_social_url(url):
 
 def audit_website(url):
     result = {
-        "has_ssl": 0,
-        "is_mobile_friendly": 0,
-        "has_chat_widget": 0,
         "social_handles": {},
-        "tech_stack": None,
-        "load_time_ms": None,
         "email": None
     }
     
@@ -47,34 +43,19 @@ def audit_website(url):
     if not re.match(r'^https?://', target_url, re.IGNORECASE):
         target_url = 'http://' + target_url
 
-    result["has_ssl"] = 1 if target_url.lower().startswith('https') else 0
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     try:
-        start_time = time.time()
         response = requests.get(target_url, headers=headers, timeout=5, allow_redirects=True)
-        load_time = int((time.time() - start_time) * 1000)
-        result["load_time_ms"] = load_time
-        
         if response.status_code != 200:
             return result
 
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # SSL updated detection (if redirected to https)
-        if response.url.lower().startswith('https'):
-            result["has_ssl"] = 1
-
-        # 1. Mobile friendliness (viewport tag verification)
-        viewport = soup.find('meta', attrs={'name': 'viewport'})
-        if viewport and 'width=device-width' in viewport.get('content', ''):
-            result["is_mobile_friendly"] = 1
-
-        # 2. Email scraping from homepage text & mailto links
+        # 1. Email scraping from homepage text & mailto links
         emails = set()
         # mailto links
         for a in soup.find_all('a', href=True):
@@ -93,7 +74,7 @@ def audit_website(url):
         if emails:
             result["email"] = list(emails)[0]
 
-        # 3. Social Media links
+        # 2. Social Media links
         socials = {}
         for a in soup.find_all('a', href=True):
             href = a['href']
@@ -108,53 +89,31 @@ def audit_website(url):
 
         result["social_handles"] = socials
 
-        # 4. Chat widgets
-        chat_signatures = ['crisp.chat', 'intercom', 'tawk.to', 'calendly', 'drift', 'hubspot']
-        for sig in chat_signatures:
-            if sig in html.lower():
-                result["has_chat_widget"] = 1
-                break
-
-        # 5. Tech stack detection
-        meta_generator = soup.find('meta', attrs={'name': 'generator'})
-        meta_content = meta_generator.get('content', '') if meta_generator else ''
-        
-        tech_patterns = [
-            ("WordPress", r'wordpress'),
-            ("Wix", r'wix\.com'),
-            ("Squarespace", r'squarespace'),
-            ("Shopify", r'shopify'),
-            ("Webflow", r'webflow')
-        ]
-        
-        for name, pattern in tech_patterns:
-            if re.search(pattern, meta_content, re.IGNORECASE) or re.search(pattern, html, re.IGNORECASE):
-                result["tech_stack"] = name
-                break
-
-    except Exception as e:
-        # Gracefully handle download errors, keeping default 0s
+    except Exception:
+        # Gracefully ignore crawling failures
         pass
 
     return result
 
-def scrape_google_maps(category, city, radius):
-    query = f"{city} {category}"
-    search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}/"
-    
+def scrape_google_maps(category, city, radius, limit):
     leads = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        print(f"Scraper: Navigating to Google Maps search page for '{query}'...", file=sys.stderr)
-        page.goto(search_url)
+        # Determine initial URL
+        if radius and radius > 0:
+            print(f"Scraper: Locating coordinates for city '{city}' to apply {radius}km radius...", file=sys.stderr)
+            initial_url = f"https://www.google.com/maps/place/{city.replace(' ', '+')}/"
+        else:
+            initial_url = f"https://www.google.com/maps/search/{category.replace(' ', '+')}+{city.replace(' ', '+')}/"
+
+        page.goto(initial_url)
         page.wait_for_timeout(3000)
 
         # Cookie consent bypass
         try:
-            # Look for "Tout accepter" (French) or "Accept all" button
             consent_selectors = [
                 'button:has-text("Tout accepter")',
                 'button:has-text("Tout autoriser")',
@@ -172,48 +131,82 @@ def scrape_google_maps(category, city, radius):
         except Exception as e:
             print(f"Scraper: Cookie check skipped or failed: {str(e)}", file=sys.stderr)
 
-        # Scroll the left pane to load items
+        # Radius query routing using coordinates if applicable
+        search_url = None
+        if radius and radius > 0:
+            # Let the URL resolve/load the city place to get coordinates in URL
+            for attempt in range(5):
+                current_url = page.url
+                match = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", current_url)
+                if match:
+                    lat, lng = match.group(1), match.group(2)
+                    # Determine zoom level based on radius:
+                    # 15z: ~2km, 14z: ~5km, 13z: ~10km, 12z: ~20km, 11z: ~50km
+                    zoom = 13
+                    if radius <= 2:
+                        zoom = 15
+                    elif radius <= 5:
+                        zoom = 14
+                    elif radius <= 10:
+                        zoom = 13
+                    elif radius <= 20:
+                        zoom = 12
+                    else:
+                        zoom = 11
+                    
+                    search_url = f"https://www.google.com/maps/search/{category.replace(' ', '+')}/@{lat},{lng},{zoom}z/"
+                    print(f"Scraper: Found city coordinates {lat},{lng}. Searching category '{category}' in viewport with zoom {zoom}z (~{radius}km radius)...", file=sys.stderr)
+                    break
+                page.wait_for_timeout(1000)
+            
+            if not search_url:
+                print("Scraper: Could not parse coordinates from URL. Falling back to text query.", file=sys.stderr)
+                search_url = f"https://www.google.com/maps/search/{category.replace(' ', '+')}+{city.replace(' ', '+')}/"
+            
+            # Navigate to the actual search URL
+            page.goto(search_url)
+            page.wait_for_timeout(3000)
+
+        # Scroll feed pane to load target amount of elements
         try:
-            # The list container is usually div[role="feed"]
             feed_selector = 'div[role="feed"]'
             page.wait_for_selector(feed_selector, timeout=10000)
             feed = page.locator(feed_selector).first
 
             print("Scraper: Scrolling results pane to collect leads...", file=sys.stderr)
             
-            # Scroll multiple times to load items
             last_count = 0
             no_new_results_count = 0
             
-            for scroll_step in range(15):
+            for scroll_step in range(100):
+                # Count current cards
+                item_count = page.locator('a[href*="/maps/place/"]').count()
+                if item_count >= limit:
+                    print(f"Scraper: Loaded {item_count} results, which satisfies limit of {limit}.", file=sys.stderr)
+                    break
+                    
                 # Scroll the feed down
                 feed.evaluate("element => element.scrollBy(0, 5000)")
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1000)
                 
-                # Check loaded items count
-                item_count = page.locator('a[href*="/maps/place/"]').count()
                 if item_count == last_count:
                     no_new_results_count += 1
-                    if no_new_results_count >= 3:
+                    if no_new_results_count >= 5:
+                        print("Scraper: Reached end of maps results feed.", file=sys.stderr)
                         break
                 else:
                     no_new_results_count = 0
                 
                 last_count = item_count
-                
-                # Stop scrolling if we have enough leads (e.g. 40 leads to respect memory and speed limits)
-                if last_count >= 40:
-                    break
-
         except Exception as e:
-            print(f"Scraper: Scrolling results failed (possibly singular result page): {str(e)}", file=sys.stderr)
+            print(f"Scraper: Feed scrolling bypass (possibly singular result page): {str(e)}", file=sys.stderr)
 
         # Gather card selectors
         cards = page.locator('a[href*="/maps/place/"]')
         count = cards.count()
-        print(f"Scraper: Found {count} business listings on page.", file=sys.stderr)
+        print(f"Scraper: Found {count} business listings on maps page.", file=sys.stderr)
 
-        # Collect basic info of all items to avoid DOM detachments during details navigation
+        # Collect basic info of all items to avoid DOM detachments
         items_raw = []
         for i in range(count):
             try:
@@ -229,14 +222,21 @@ def scrape_google_maps(category, city, radius):
             except Exception:
                 continue
 
-        # Extract details for each lead
+        # Enforce maximum scrape limit
+        items_raw = items_raw[:limit]
+
+        # Extract details for each lead using optimized in-page clicks
         for idx, item in enumerate(items_raw):
             try:
                 print(f"Scraper: Extracting detail for lead {idx+1}/{len(items_raw)}: {item['name']}", file=sys.stderr)
                 
-                # Navigate to the specific place detail view
-                page.goto(item['maps_url'])
-                page.wait_for_timeout(2000)
+                # Locate card element by index and click
+                card_element = page.locator('a[href*="/maps/place/"]').nth(idx)
+                card_element.scroll_into_view_if_needed()
+                card_element.click()
+                
+                # Wait for detail pane to load in the UI
+                page.wait_for_timeout(1200)
 
                 # Parse detail elements
                 name = item['name']
@@ -249,7 +249,6 @@ def scrape_google_maps(category, city, radius):
 
                 # 1. Website
                 try:
-                    # Look for button with website icon/globe or specific data-item-id="authority"
                     web_loc = page.locator('a[data-item-id="authority"]').first
                     if web_loc.count() > 0:
                         website = web_loc.get_attribute('href')
@@ -258,7 +257,6 @@ def scrape_google_maps(category, city, radius):
 
                 # 2. Phone
                 try:
-                    # Look for data-item-id starting with phone:tel:
                     phone_loc = page.locator('button[data-item-id^="phone:tel:"]').first
                     if phone_loc.count() > 0:
                         phone = phone_loc.get_attribute('data-item-id').replace('phone:tel:', '').strip()
@@ -275,8 +273,6 @@ def scrape_google_maps(category, city, radius):
 
                 # 4. Rating and reviews
                 try:
-                    # Maps detail view contains rating in a span like "4,6" and review count "87 avis"
-                    # We can target classes or roles
                     rating_loc = page.locator('div.F7nice span[aria-hidden="true"]').first
                     if rating_loc.count() > 0:
                         rating_text = rating_loc.inner_text().replace(',', '.')
@@ -285,14 +281,13 @@ def scrape_google_maps(category, city, radius):
                     reviews_loc = page.locator('div.F7nice button.HHrUfc').first
                     if reviews_loc.count() > 0:
                         reviews_text = reviews_loc.inner_text()
-                        # Extract digits
                         digits = re.findall(r'\d+', reviews_text.replace(' ', ''))
                         if digits:
                             review_count = int(digits[0])
                 except Exception:
                     pass
 
-                # Build the lead structure
+                # Build lead dictionary
                 lead = {
                     "name": name,
                     "category": category,
@@ -306,22 +301,15 @@ def scrape_google_maps(category, city, radius):
                     "status": "New"
                 }
 
-                # Perform Digital Audit if website exists
+                # Retrieve emails and social handles from website
                 if website:
-                    print(f"Scraper: Auditing website {website}...", file=sys.stderr)
+                    print(f"Scraper: Crawling website {website}...", file=sys.stderr)
                     audit = audit_website(website)
                     lead.update(audit)
-                    
-                    # Store social handles as JSON string
                     lead["social_handles"] = json.dumps(audit.get("social_handles", {}))
                 else:
                     lead.update({
-                        "has_ssl": 0,
-                        "is_mobile_friendly": 0,
-                        "has_chat_widget": 0,
                         "social_handles": json.dumps({}),
-                        "tech_stack": None,
-                        "load_time_ms": None,
                         "email": None
                     })
 
@@ -338,8 +326,8 @@ def main():
     args = parse_args()
     
     try:
-        leads = scrape_google_maps(args.category, args.city, args.radius)
-        # Print leads as JSON on stdout
+        leads = scrape_google_maps(args.category, args.city, args.radius, args.limit)
+        # Output leads JSON on stdout
         print(json.dumps(leads, indent=2, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
