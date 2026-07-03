@@ -22,8 +22,10 @@ import Login from './pages/Login';
 import AdminPanel from './pages/AdminPanel';
 import TeamSpace from './pages/TeamSpace';
 
-// API Host configuration for production (Render) and development (localhost)
-const API_HOST = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_HOST = import.meta.env.VITE_API_URL || 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:3001' 
+    : `http://${window.location.hostname}:3001`);
 
 // Dynamic Fallback leads for premium initial visual seeding
 const INITIAL_FALLBACK_LEADS = [
@@ -162,8 +164,10 @@ export default function App() {
   }, []);
 
   // Fetch leads from SQLite/PostgreSQL backend
-  const loadLeadsFromApi = async () => {
-    setLoading(true);
+  const loadLeadsFromApi = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const res = await fetch(`${API_HOST}/api/leads`);
       if (res.ok) {
@@ -256,7 +260,7 @@ export default function App() {
           <Dashboard 
             apiHost={API_HOST} 
             leads={leads} 
-            reloadLeads={loadLeadsFromApi} 
+            reloadLeads={() => loadLeadsFromApi(true)} 
           />
         );
       case 'leads':
@@ -264,7 +268,7 @@ export default function App() {
           <LeadsManager 
             apiHost={API_HOST} 
             leads={leads} 
-            reloadLeads={loadLeadsFromApi} 
+            reloadLeads={() => loadLeadsFromApi(true)} 
           />
         );
       case 'campaigns':
@@ -272,7 +276,7 @@ export default function App() {
           <Campaigns 
             apiHost={API_HOST} 
             leads={leads} 
-            reloadLeads={loadLeadsFromApi} 
+            reloadLeads={() => loadLeadsFromApi(true)} 
             currentUser={user}
           />
         );
@@ -281,7 +285,7 @@ export default function App() {
           <Settings 
             apiHost={API_HOST} 
             leads={leads} 
-            reloadLeads={loadLeadsFromApi} 
+            reloadLeads={() => loadLeadsFromApi(true)} 
             currentUser={user}
             setCurrentUser={setUser}
           />
@@ -291,7 +295,7 @@ export default function App() {
           <Dashboard 
             apiHost={API_HOST} 
             leads={leads} 
-            reloadLeads={loadLeadsFromApi} 
+            reloadLeads={() => loadLeadsFromApi(true)} 
           />
         );
     }

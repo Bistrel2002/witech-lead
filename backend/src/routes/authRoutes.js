@@ -163,7 +163,7 @@ router.get('/google', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   
-  if (clientId && clientSecret) {
+  if (process.env.VITE_MOCK_AUTH !== 'true' && clientId && clientSecret) {
     // Real Google OAuth 2.0 flow
     const backendCallback = `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/auth/google/callback`;
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(backendCallback)}&response_type=code&scope=openid%20email%20profile&prompt=select_account`;
@@ -388,7 +388,7 @@ router.get('/apple', (req, res) => {
 
   const clientId = process.env.APPLE_CLIENT_ID;
   
-  if (clientId) {
+  if (process.env.VITE_MOCK_AUTH !== 'true' && clientId) {
     // Real Apple OAuth 2.0 flow
     const backendCallback = `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/auth/apple/callback`;
     const appleAuthUrl = `https://appleid.apple.com/auth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(backendCallback)}&response_type=code%20id_token&scope=name%20email&response_mode=form_post`;

@@ -25,9 +25,9 @@
     "semantic_hash": "46e888695fd30a03912e96d06611bbe4"
   },
   "backend/src/routes/authRoutes.js": {
-    "mtime": 1783078763.398595,
-    "ast_hash": "eacd944f0d1cfd2307db8bf0b32012fe",
-    "semantic_hash": ""
+    "mtime": 1782999715.052402,
+    "ast_hash": "658b12b2951bc9955dfce6db1b13800f",
+    "semantic_hash": "658b12b2951bc9955dfce6db1b13800f"
   },
   "backend/src/routes/portalRoutes.js": {
     "mtime": 1781027170.3217525,
@@ -65,9 +65,9 @@
     "semantic_hash": "fc2cfcfeae34c58f0b7c672b9465201d"
   },
   "frontend/src/App.jsx": {
-    "mtime": 1783084664.76118,
-    "ast_hash": "59e8815ab4ba28d797dc155f7661e5ab",
-    "semantic_hash": ""
+    "mtime": 1781704276.3391745,
+    "ast_hash": "ff387f77cdab6adeca72351dd6944870",
+    "semantic_hash": "ff387f77cdab6adeca72351dd6944870"
   },
   "frontend/src/main.jsx": {
     "mtime": 1781030055.175779,
@@ -110,9 +110,9 @@
     "semantic_hash": "e5b2bbf0aa48b5ad2b9d40d05eee7b87"
   },
   "frontend/vite.config.js": {
-    "mtime": 1783018879.4128902,
-    "ast_hash": "cc32c2264636910356bd738d0450b9f8",
-    "semantic_hash": ""
+    "mtime": 1782999719.9036658,
+    "ast_hash": "6a1033bbe0aef60e85a34bbb7ad07d84",
+    "semantic_hash": "6a1033bbe0aef60e85a34bbb7ad07d84"
   },
   "package.json": {
     "mtime": 1780301303.829311,

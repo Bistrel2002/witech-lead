@@ -1,7 +1,7 @@
-# Graph Report - Witech Lead  (2026-07-03)
+# Graph Report - Witech Lead  (2026-07-02)
 
 ## Corpus Check
-- 41 files · ~50,683 words
+- 41 files · ~50,675 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
