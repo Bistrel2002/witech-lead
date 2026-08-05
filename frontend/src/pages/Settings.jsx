@@ -191,8 +191,11 @@ export default function Settings({ apiHost, leads = [], reloadLeads, currentUser
               <div className="p-4 rounded-xl text-sm flex items-start gap-3 border bg-emerald-50 border-emerald-200 text-emerald-800">
                 <Check className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                 <span>
+                  {/* currentUser, not profileForm: profileForm is the live edit buffer, so
+                      mid-edit this card would claim mail already goes out under text the
+                      customer is still typing and has not saved. */}
                   <strong>Prêt à l'envoi.</strong> Vos e-mails partent au nom de{' '}
-                  <strong>{profileForm.name}</strong>. Les réponses de vos prospects arrivent
+                  <strong>{currentUser?.name}</strong>. Les réponses de vos prospects arrivent
                   directement dans <strong>{sending.replyTo}</strong>.
                 </span>
               </div>

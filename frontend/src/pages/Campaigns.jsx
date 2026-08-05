@@ -37,10 +37,23 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
 
+  // Platform sending status for this tenant. null = not yet known.
+  const [sending, setSending] = useState(null);
+
+  const loadSendingStatus = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/sending-status`, { credentials: 'include' });
+      if (res.ok) setSending(await res.json());
+    } catch (err) {
+      console.error('Failed to load sending status', err);
+    }
+  };
+
   // Load Templates & Campaigns on Mount
   useEffect(() => {
     loadTemplates();
     loadCampaigns();
+    loadSendingStatus();
     return () => {
       if (pollingInterval) clearInterval(pollingInterval);
     };
@@ -117,6 +130,28 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     return compiled;
   };
 
+  /**
+   * Why this campaign cannot be launched right now, or null.
+   *
+   * Mirrors assertChannelSendable on the backend, which is what actually
+   * enforces it — this exists so the customer sees the reason before clicking
+   * rather than after. `sending === null` means the status has not loaded yet;
+   * we do not block on that, the backend's 400 is the real gate.
+   */
+  const sendingBlockReason = (() => {
+    if (!sending) return null;
+    if (sending.pausedAt) {
+      return "Envoi suspendu pour ce compte suite à un taux de plainte trop élevé. Contactez le support.";
+    }
+    if (newCampaign.channel === 'email' && sending.status !== 'verified') {
+      if (sending.status === 'failed') {
+        return "La préparation de votre infrastructure d'envoi a échoué. Ouvrez « Configurations & Outils » et cliquez sur Actualiser, puis contactez le support si le problème persiste.";
+      }
+      return "Votre domaine d'envoi n'est pas encore vérifié — cela prend généralement quelques minutes après l'inscription. Vous pouvez suivre l'état dans « Configurations & Outils ».";
+    }
+    return null;
+  })();
+
   // Filter categories depending on selected channel
   const uniqueCategoriesWithContacts = [...new Set(
     leads
@@ -124,7 +159,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         if (newCampaign.channel === 'email') {
           return l.email && l.email.trim() !== '';
         } else {
-          // SMS or WhatsApp require a valid phone number
+          // SMS requires a valid phone number
           return l.phone && l.phone.trim() !== '';
         }
       })
@@ -215,6 +250,10 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       alert('Veuillez remplir tous les champs');
       return;
     }
+    if (sendingBlockReason) {
+      alert(sendingBlockReason);
+      return;
+    }
 
     try {
       const isVirtual = ['__WITH_WEBSITE__', '__WITHOUT_WEBSITE__', '__WITH_EMAIL__', '__WITHOUT_EMAIL__'].includes(newCampaign.category);
@@ -240,9 +279,17 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       if (res.ok) {
         const campaign = await res.json();
         
-        // Auto-trigger background delivery send
-        await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST', credentials: 'include' });
-        
+        // Auto-trigger background delivery send. /start now refuses with 400
+        // and a readable French reason when this tenant cannot send (domain
+        // not verified yet, account suspended), so surface it instead of
+        // dropping the customer into a campaign that will silently Fail.
+        const startRes = await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST', credentials: 'include' });
+        if (!startRes.ok) {
+          const startData = await startRes.json().catch(() => ({}));
+          alert(startData.error || "La campagne a été créée mais n'a pas pu démarrer.");
+          loadSendingStatus();
+        }
+
         await loadCampaigns();
         
         // Open campaign details panel immediately
@@ -291,27 +338,26 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     }
   };
 
-  const handleResumeCampaign = async (id) => {
+  // Both of these re-enter the same background run, so both can now be
+  // refused with 400 and a reason. Never swallow that silently.
+  const runCampaignAction = async (id, action) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/start`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/${action}`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         viewCampaignDetails(id);
+        return;
       }
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "La campagne n'a pas pu être relancée.");
+      loadSendingStatus();
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleRestartCampaign = async (id) => {
-    try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/restart`, { method: 'POST', credentials: 'include' });
-      if (res.ok) {
-        viewCampaignDetails(id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const handleResumeCampaign = (id) => runCampaignAction(id, 'start');
+
+  const handleRestartCampaign = (id) => runCampaignAction(id, 'restart');
 
   // Mailto Link Generator for Manual Outreach option
   const getMailtoLink = (lead, template) => {
@@ -331,14 +377,12 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
   };
 
-  // SMS / WhatsApp Link Generator
-  const getMessageLink = (lead, template, type) => {
+  // SMS Link Generator. WhatsApp is not a channel the platform supports:
+  // campaigns are email or sms only (see validateChannel on the backend).
+  const getMessageLink = (lead, template) => {
     if (!lead || !template) return '#';
     const compiledBody = compileClientDraft(template.body || '', lead);
     const cleanPhone = lead.phone ? lead.phone.replace(/[\s\-\(\)]/g, '') : '';
-    if (type === 'whatsapp') {
-      return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(compiledBody)}`;
-    }
     return `sms:${cleanPhone}?body=${encodeURIComponent(compiledBody)}`;
   };
 
@@ -639,10 +683,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 </p>
               </div>
 
-              <button 
-                type="submit" 
+              {sendingBlockReason && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-2.5">
+                  <XCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-amber-800 text-[11px] leading-normal font-semibold">
+                    {sendingBlockReason}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
                 className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id}
+                disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id || !!sendingBlockReason}
+                title={sendingBlockReason || undefined}
               >
                 Lancer la Campagne ({campaignPreviewLeads.length} cibles)
               </button>
@@ -760,14 +814,13 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       <a 
                         href={getMessageLink(
                           campaignPreviewLeads[selectedPreviewLeadIdx],
-                          templates.find(t => t.id === parseInt(newCampaign.template_id)),
-                          newCampaign.channel
+                          templates.find(t => t.id === parseInt(newCampaign.template_id))
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
                       >
-                        {newCampaign.channel === 'whatsapp' ? 'Ouvrir WhatsApp' : 'Ouvrir SMS'}
+                        Ouvrir SMS
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     )}
