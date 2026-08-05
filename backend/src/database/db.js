@@ -89,6 +89,52 @@ export async function getFrenchDb() {
   return await getDb();
 }
 
+/**
+ * One-time backfill: copies the legacy global branding rows (company_name,
+ * company_website, sender_signature — which used to live in `settings`)
+ * onto every user who doesn't already have their own value, then deletes
+ * those rows from `settings`.
+ *
+ * The DELETE is not optional cleanup: `initPostgresDb` runs on every server
+ * boot, not once. Without it, a customer who signs up between two boots
+ * starts with NULL branding columns; on the next restart this backfill
+ * would find the (never-deleted) legacy rows still in `settings` and
+ * silently copy the *previous global tenant's* signature onto the new
+ * user's NULL columns via the `WHERE ... IS NULL` match — reintroducing
+ * the exact cross-tenant leak this task exists to fix. Deleting the legacy
+ * rows once they're copied makes `legacyBranding` empty on every later
+ * boot, so this whole function becomes a no-op forever after the first
+ * run following this migration.
+ */
+export async function backfillLegacyBranding(db) {
+  const legacyBranding = await db.all(
+    "SELECT key, value FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+  );
+  if (legacyBranding.length === 0) return;
+
+  const legacy = legacyBranding.reduce((acc, row) => {
+    acc[row.key] = row.value;
+    return acc;
+  }, {});
+  await db.run(
+    `UPDATE users
+       SET company_name     = COALESCE(company_name, ?),
+           company_website  = COALESCE(company_website, ?),
+           sender_signature = COALESCE(sender_signature, ?)
+     WHERE company_name IS NULL
+        OR company_website IS NULL
+        OR sender_signature IS NULL`,
+    legacy.company_name || null,
+    legacy.company_website || null,
+    legacy.sender_signature || null
+  );
+
+  // Retire the legacy rows so this function is a no-op on every future boot.
+  await db.run(
+    "DELETE FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+  );
+}
+
 async function initPostgresDb(db) {
   // Create users table
   await db.exec(`
@@ -206,19 +252,10 @@ async function initPostgresDb(db) {
     CREATE INDEX IF NOT EXISTS idx_lead_discussions_lead ON lead_discussions(lead_id);
   `);
 
-  // Insert default settings
-  const defaultSettings = [
-    { key: 'company_name', value: "Wi'Tech Agency" },
-    { key: 'company_website', value: 'https://www.witechagency.com' },
-    { key: 'sender_signature', value: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com" }
-  ];
-
-  for (const setting of defaultSettings) {
-    const existing = await db.get('SELECT key FROM settings WHERE key = ?', setting.key);
-    if (!existing) {
-      await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', setting.key, setting.value);
-    }
-  }
+  // Branding (company_name, company_website, sender_signature) used to be
+  // seeded here as global settings rows. They now live on `users` (see
+  // backfillLegacyBranding below) and ALLOWED_SETTING_KEYS in routes.js is
+  // empty, so nothing may be written to or seeded into `settings` any more.
 
   // One-time cleanup: sending credentials used to live here and were readable
   // by every authenticated tenant. They are now platform-owned.
@@ -232,29 +269,7 @@ async function initPostgresDb(db) {
      )`
   );
 
-  // Backfill: give every existing user the previously-global branding values,
-  // then retire those rows.
-  const legacyBranding = await db.all(
-    "SELECT key, value FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
-  );
-  if (legacyBranding.length > 0) {
-    const legacy = legacyBranding.reduce((acc, row) => {
-      acc[row.key] = row.value;
-      return acc;
-    }, {});
-    await db.run(
-      `UPDATE users
-         SET company_name     = COALESCE(company_name, ?),
-             company_website  = COALESCE(company_website, ?),
-             sender_signature = COALESCE(sender_signature, ?)
-       WHERE company_name IS NULL
-          OR company_website IS NULL
-          OR sender_signature IS NULL`,
-      legacy.company_name || null,
-      legacy.company_website || null,
-      legacy.sender_signature || null
-    );
-  }
+  await backfillLegacyBranding(db);
 
   // Seed default templates
   const templatesCount = await db.get('SELECT COUNT(*) as count FROM templates');
