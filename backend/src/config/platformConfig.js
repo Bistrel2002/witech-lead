@@ -11,7 +11,8 @@ const REQUIRED_VARS = [
   'MAIL_ROOT_DOMAIN',
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
-  'TWILIO_SENDER_ID'
+  'TWILIO_SENDER_ID',
+  'SES_WEBHOOK_TOKEN'
 ];
 
 let cached = null;
@@ -43,6 +44,13 @@ export function getPlatformConfig() {
       accountSid: process.env.TWILIO_ACCOUNT_SID,
       authToken: process.env.TWILIO_AUTH_TOKEN,
       senderId: process.env.TWILIO_SENDER_ID
+    }),
+    webhook: Object.freeze({
+      // Shared secret the SES bounce/complaint webhook requires as ?token=...
+      // on every request. SNS cannot present a session cookie, so this is the
+      // only thing standing between an unauthenticated attacker and the
+      // ability to post fake bounce/complaint events for any tenant.
+      token: process.env.SES_WEBHOOK_TOKEN
     })
   });
 

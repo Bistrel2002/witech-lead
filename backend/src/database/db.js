@@ -233,11 +233,24 @@ async function initPostgresDb(db) {
       event_type VARCHAR(30) NOT NULL,
       recipient VARCHAR(255),
       sending_domain VARCHAR(255),
+      message_id VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // SNS delivers at-least-once. message_id (SNS's own MessageId) lets the
+  // webhook dedup a redelivered notification so a single genuine complaint
+  // is never double-counted toward the auto-pause threshold. ADD COLUMN IF
+  // NOT EXISTS migrates installs that created this table before message_id
+  // existed.
+  await db.exec(`
+    ALTER TABLE sending_events ADD COLUMN IF NOT EXISTS message_id VARCHAR(255);
+  `);
   await db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sending_events_user ON sending_events(user_id, event_type);
+  `);
+  await db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sending_events_message_id
+      ON sending_events(message_id) WHERE message_id IS NOT NULL;
   `);
 
   // Create lead_discussions table

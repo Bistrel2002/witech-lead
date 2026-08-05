@@ -7,7 +7,8 @@ const REQUIRED = {
   MAIL_ROOT_DOMAIN: 'mail.witechagency.com',
   TWILIO_ACCOUNT_SID: 'ACtest',
   TWILIO_AUTH_TOKEN: 'tokentest',
-  TWILIO_SENDER_ID: 'WITECH'
+  TWILIO_SENDER_ID: 'WITECH',
+  SES_WEBHOOK_TOKEN: 'webhook-secret-test-token'
 };
 
 function withEnv(overrides, fn) {
@@ -28,6 +29,7 @@ test('returns the configured values', () => {
     assert.equal(cfg.aws.region, 'eu-west-3');
     assert.equal(cfg.mail.rootDomain, 'mail.witechagency.com');
     assert.equal(cfg.twilio.senderId, 'WITECH');
+    assert.equal(cfg.webhook.token, 'webhook-secret-test-token');
   });
 });
 
@@ -51,6 +53,12 @@ test('throws and names every missing variable', () => {
       assert.doesNotMatch(err.message, /MAIL_ROOT_DOMAIN/);
       return true;
     });
+  });
+});
+
+test('throws when SES_WEBHOOK_TOKEN is missing', () => {
+  withEnv({ SES_WEBHOOK_TOKEN: undefined }, () => {
+    assert.throws(() => getPlatformConfig(), /SES_WEBHOOK_TOKEN/);
   });
 });
 

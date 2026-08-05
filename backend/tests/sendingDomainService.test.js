@@ -16,7 +16,8 @@ const ENV = {
   ROUTE53_HOSTED_ZONE_ID: 'Z123',
   TWILIO_ACCOUNT_SID: 'ACtest',
   TWILIO_AUTH_TOKEN: 'tok',
-  TWILIO_SENDER_ID: 'WITECH'
+  TWILIO_SENDER_ID: 'WITECH',
+  SES_WEBHOOK_TOKEN: 'test-webhook-token'
 };
 
 test.beforeEach(() => {

@@ -10,7 +10,8 @@ test.beforeEach(() => {
     ROUTE53_HOSTED_ZONE_ID: 'Z1',
     TWILIO_ACCOUNT_SID: 'AC',
     TWILIO_AUTH_TOKEN: 't',
-    TWILIO_SENDER_ID: 'WITECH'
+    TWILIO_SENDER_ID: 'WITECH',
+    SES_WEBHOOK_TOKEN: 'test-webhook-token'
   });
   resetPlatformConfigCache();
 });

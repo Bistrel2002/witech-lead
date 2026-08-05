@@ -20,6 +20,23 @@ test('unwraps the double-encoded SNS Message field', () => {
   assert.equal(parsed.message.eventType, 'Complaint');
 });
 
+test('carries the SNS MessageId through for dedup', () => {
+  const parsed = parseSnsNotification(JSON.stringify({
+    Type: 'Notification',
+    MessageId: 'sns-abc-123',
+    Message: JSON.stringify({ eventType: 'Complaint' })
+  }));
+  assert.equal(parsed.messageId, 'sns-abc-123');
+});
+
+test('messageId is null when SNS does not supply one', () => {
+  const parsed = parseSnsNotification(JSON.stringify({
+    Type: 'Notification',
+    Message: JSON.stringify({ eventType: 'Complaint' })
+  }));
+  assert.equal(parsed.messageId, null);
+});
+
 test('extracts a complaint with its recipient and sending domain', () => {
   const event = extractDeliveryEvent({
     eventType: 'Complaint',
