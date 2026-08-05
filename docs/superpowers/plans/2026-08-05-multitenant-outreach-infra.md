@@ -1806,6 +1806,7 @@ git commit -m "feat(email): record SES bounces and auto-pause tenants over the c
 
 **Files:**
 - Modify: `frontend/src/pages/Settings.jsx`
+- Modify: `frontend/src/pages/Campaigns.jsx` (remove WhatsApp from the automated channel selector)
 
 **Interfaces:**
 - Consumes: `GET /api/sending-status` (Task 5), `PUT /api/auth/profile` with the new fields (Task 3).
@@ -1973,6 +1974,22 @@ npm run lint --prefix frontend
 ```
 
 Expected: no errors for `Settings.jsx`.
+
+- [ ] **Step 8b: Remove WhatsApp from the automated campaign channel selector**
+
+Found in pre-flight review: the backend now rejects `channel === 'whatsapp'`, but `frontend/src/pages/Campaigns.jsx` still offers WhatsApp as a channel for automated campaigns, so such a campaign would be created and then fail at send time.
+
+In `frontend/src/pages/Campaigns.jsx`, delete the WhatsApp channel `<button>` (around line 526-527 — the one whose `onClick` runs `setNewCampaign({ ...newCampaign, channel: 'whatsapp', category: '' })`). Adjust the surrounding grid so the remaining channel buttons (email, sms) still fill the row.
+
+**Keep the manual `wa.me` flow untouched.** `getMessageLink` (around line 336) and the "Ouvrir WhatsApp" preview button (around line 779) open WhatsApp Web with a pre-filled message for the user to send by hand. That path uses no backend and no Twilio, so it stays exactly as it is.
+
+Verify no automated path can still select it:
+
+```bash
+grep -n "channel: 'whatsapp'" frontend/src/pages/Campaigns.jsx
+```
+
+Expected: no output. (`getMessageLink`'s `type === 'whatsapp'` comparison and the preview button's label remain — those are the manual flow.)
 
 - [ ] **Step 9: Verify the page renders**
 
