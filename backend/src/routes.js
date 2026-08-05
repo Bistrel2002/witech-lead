@@ -842,14 +842,14 @@ router.get('/templates', async (req, res) => {
 
 router.post('/templates', async (req, res) => {
   const { name, subject, body } = req.body;
-  if (!name || !subject || !body) {
-    return res.status(400).json({ error: 'Name, Subject, and Body are required' });
+  if (!name || !body) {
+    return res.status(400).json({ error: 'Le nom et le corps du message sont requis.' });
   }
   try {
     const db = await getDb();
     const result = await db.run(
       'INSERT INTO templates (user_id, name, subject, body) VALUES (?, ?, ?, ?)',
-      req.user.id, name, subject, body
+      req.user.id, name, subject || '', body
     );
     const newTemplate = await db.get('SELECT * FROM templates WHERE id = ?', result.lastID);
     res.status(201).json(newTemplate);

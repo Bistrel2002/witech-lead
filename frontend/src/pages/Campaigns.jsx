@@ -49,7 +49,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const loadTemplates = async () => {
     try {
-      const res = await fetch(`${apiHost}/api/templates`);
+      const res = await fetch(`${apiHost}/api/templates`, { credentials: 'include' });
       if (res.ok) setTemplates(await res.json());
     } catch (err) {
       console.error('Failed to load templates', err);
@@ -58,7 +58,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const loadCampaigns = async () => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns`);
+      const res = await fetch(`${apiHost}/api/campaigns`, { credentials: 'include' });
       if (res.ok) setCampaigns(await res.json());
     } catch (err) {
       console.error('Failed to load campaigns', err);
@@ -72,7 +72,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     // Poll every 2 seconds
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`);
+        const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setSelectedCampaignDetails(data);
@@ -173,6 +173,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       const res = await fetch(url, {
         method,
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(templateForm)
       });
@@ -182,9 +183,13 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         setShowTemplateForm(false);
         setEditingTemplate(null);
         setTemplateForm({ name: '', subject: '', body: '' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `Erreur lors de la sauvegarde (${res.status})`);
       }
     } catch (err) {
       console.error(err);
+      alert('Erreur réseau — vérifiez que le serveur backend est en marche.');
     }
   };
 
@@ -197,7 +202,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   const handleDeleteTemplate = async (id) => {
     if (!window.confirm('Voulez-vous supprimer ce modèle ?')) return;
     try {
-      const res = await fetch(`${apiHost}/api/templates/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${apiHost}/api/templates/${id}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) loadTemplates();
     } catch (err) {
       console.error(err);
@@ -228,6 +233,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       const res = await fetch(`${apiHost}/api/campaigns`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -236,7 +242,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         const campaign = await res.json();
         
         // Auto-trigger background delivery send
-        await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST' });
+        await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST', credentials: 'include' });
         
         await loadCampaigns();
         
@@ -256,7 +262,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const viewCampaignDetails = async (campaignId) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`);
+      const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSelectedCampaignDetails(data);
@@ -273,7 +279,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handlePauseCampaign = async (id) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/pause`, { method: 'POST' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/pause`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         if (pollingInterval) {
           clearInterval(pollingInterval);
@@ -288,7 +294,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handleResumeCampaign = async (id) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/start`, { method: 'POST' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/start`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         viewCampaignDetails(id);
       }
@@ -299,7 +305,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handleRestartCampaign = async (id) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/restart`, { method: 'POST' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/restart`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         viewCampaignDetails(id);
       }
@@ -311,15 +317,25 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   // Mailto Link Generator for Manual Outreach option
   const getMailtoLink = (lead, template) => {
     if (!lead || !template) return '#';
-    const compiledSubject = compileClientDraft(template.subject, lead);
-    const compiledBody = compileClientDraft(template.body, lead);
-    return `mailto:${lead.email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
+    const email = lead.email || '';
+    const compiledSubject = compileClientDraft(template.subject || '', lead);
+    const compiledBody = compileClientDraft(template.body || '', lead);
+    return `mailto:${email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
+  };
+
+  // Direct Gmail Web Compose Link Generator
+  const getGmailLink = (lead, template) => {
+    if (!lead || !template) return '#';
+    const email = lead.email || '';
+    const compiledSubject = compileClientDraft(template.subject || '', lead);
+    const compiledBody = compileClientDraft(template.body || '', lead);
+    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
   };
 
   // SMS / WhatsApp Link Generator
   const getMessageLink = (lead, template, type) => {
     if (!lead || !template) return '#';
-    const compiledBody = compileClientDraft(template.body, lead);
+    const compiledBody = compileClientDraft(template.body || '', lead);
     const cleanPhone = lead.phone ? lead.phone.replace(/[\s\-\(\)]/g, '') : '';
     if (type === 'whatsapp') {
       return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(compiledBody)}`;
@@ -328,7 +344,8 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   };
 
   const handleCopyClipboard = (lead, template) => {
-    const compiledBody = compileClientDraft(template.body, lead);
+    if (!lead || !template) return;
+    const compiledBody = compileClientDraft(template.body || '', lead);
     navigator.clipboard.writeText(compiledBody);
     alert('📝 Message copié dans le presse-papier !');
   };
@@ -529,12 +546,42 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible *</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filtrer par Secteur / Métier (Issus de la base)</label>
+                
+                {/* Quick Sector Selector Buttons derived directly from DB leads */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${!newCampaign.category ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    onClick={() => setNewCampaign({ ...newCampaign, category: '' })}
+                  >
+                    Toutes les catégories ({leads.length} prospects)
+                  </button>
+                  {uniqueCategoriesWithContacts.map(cat => {
+                    const count = leads.filter(l => {
+                      const matches = l.category === cat;
+                      return newCampaign.channel === 'email' ? (matches && l.email && l.email.trim() !== '') : (matches && l.phone && l.phone.trim() !== '');
+                    }).length;
+                    const isSelected = newCampaign.category === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isSelected ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                        onClick={() => setNewCampaign({ ...newCampaign, category: isSelected ? '' : cat })}
+                      >
+                        {cat} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible Sélectionnée *</label>
                 <select 
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                   value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
                 >
-                  <option value="">-- Sélectionnez une catégorie --</option>
+                  <option value="">-- Sélectionnez une catégorie ou un segment --</option>
                   
                   <optgroup label="Segments Globaux (Tous métiers)">
                     {[
@@ -569,7 +616,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     })}
                   </optgroup>
 
-                  <optgroup label="Catégories Professionnelles">
+                  <optgroup label="Secteurs & Catégories de la Base de Données">
                     {uniqueCategoriesWithContacts.map(c => {
                       const count = leads.filter(l => {
                         const hasCat = l.category === c;
@@ -678,10 +725,10 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   </div>
                   
                   {/* Action triggers */}
-                  <div className="flex gap-3 pt-2">
+                  <div className="flex flex-wrap gap-2 pt-2">
                     <button 
                       type="button" 
-                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150"
+                      className="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150 shadow-sm"
                       onClick={() => handleCopyClipboard(
                         campaignPreviewLeads[selectedPreviewLeadIdx],
                         templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -690,16 +737,34 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       Copier le corps
                     </button>
                     {newCampaign.channel === 'email' ? (
-                      <a 
-                        href={getMailtoLink(
-                          campaignPreviewLeads[selectedPreviewLeadIdx],
-                          templates.find(t => t.id === parseInt(newCampaign.template_id))
-                        )}
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
-                      >
-                        Ouvrir le client Mail
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                      <>
+                        <a 
+                          href={getMailtoLink(
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            templates.find(t => t.id === parseInt(newCampaign.template_id))
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          title="Ouvrir avec votre logiciel de messagerie par défaut (Apple Mail, Outlook, etc.)"
+                        >
+                          Ouvrir le client Mail
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <a 
+                          href={getGmailLink(
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            templates.find(t => t.id === parseInt(newCampaign.template_id))
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-red-600 text-white font-semibold text-xs hover:bg-red-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          title="Ouvrir directement dans Gmail sur le web"
+                        >
+                          Gmail Web
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </>
                     ) : (
                       <a 
                         href={getMessageLink(
@@ -707,7 +772,9 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           templates.find(t => t.id === parseInt(newCampaign.template_id)),
                           newCampaign.channel
                         )}
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
                       >
                         {newCampaign.channel === 'whatsapp' ? 'Ouvrir WhatsApp' : 'Ouvrir SMS'}
                         <ExternalLink className="w-3.5 h-3.5" />
