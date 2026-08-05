@@ -74,6 +74,12 @@ Because the backend runs heavy long-running Puppeteer scrapers and writes to a s
 *   **Do not deploy the backend on Vercel serverless functions.** Vercel functions are stateless and ephemeral (any SQLite edits will be wiped out), and their execution timeout (10–60s) is too short for Puppeteer scrapers.
 *   **Recommended Hosting:** Host the backend on **Render**, **Railway**, **Fly.io**, or any Virtual Private Server (VPS) that supports persistent storage disks and custom Docker/Node configurations with Chromium packages.
 
+### Configuration de la plateforme (une seule fois)
+
+L'envoi d'e-mails et de SMS repose sur une infrastructure gérée par l'opérateur
+(AWS SES + Twilio). Voir [docs/platform-setup.md](docs/platform-setup.md) — cette
+configuration est requise avant tout envoi réel.
+
 ---
 
 ## 🛠️ Key Features
