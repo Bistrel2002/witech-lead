@@ -551,6 +551,13 @@ router.get('/apple/mock-callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      // Every user-creation site must call this — a user created without a
+      // sending domain cannot send anything, and until refreshTenantSendingStatus
+      // learned to re-provision, omitting it here left the account permanently
+      // unable to run a campaign.
+      ensureTenantSendingDomain(user.id, db);
     }
 
     const token = generateToken(user);

@@ -1127,13 +1127,25 @@ router.get('/sending-status', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
 
     let status = user.send_subdomain_status || 'pending';
+    let subdomain = user.send_subdomain;
+
     if (status !== 'verified') {
+      // Also re-provisions a tenant stuck without a subdomain or in 'failed',
+      // and persists whatever it concludes — so this response and the row can
+      // never disagree. Rate limiting against SES/Route53 lives inside
+      // refreshTenantSendingStatus (status cache + provisioning cooldown), so
+      // this route is safe to poll.
       status = await refreshTenantSendingStatus(req.user.id, db);
+      if (!subdomain) {
+        // A re-provision may have just assigned one; the row read above is stale.
+        const refreshed = await db.get('SELECT send_subdomain FROM users WHERE id = ?', req.user.id);
+        subdomain = refreshed?.send_subdomain ?? null;
+      }
     }
 
     res.json({
       status,
-      subdomain: user.send_subdomain,
+      subdomain,
       replyTo: user.email,
       pausedAt: user.sending_paused_at || null
     });
