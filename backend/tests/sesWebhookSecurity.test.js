@@ -32,7 +32,16 @@ function fakeDb({ users = [], events = [] } = {}) {
       }
       if (/COUNT\(\*\) FILTER/.test(sql)) {
         const userId = params[0];
-        const rows = events.filter((e) => e.user_id === userId);
+        // Model whatever time window the statement actually asks for, read
+        // out of the SQL rather than assumed, so an unwindowed query cannot
+        // quietly satisfy a windowed expectation.
+        const windowMatch = sql.match(/interval\s+'(\d+)\s+days?'/i);
+        const cutoff = windowMatch ? Date.now() - Number(windowMatch[1]) * 86400000 : null;
+        const rows = events.filter((e) => {
+          if (e.user_id !== userId) return false;
+          if (cutoff === null || e.created_at === undefined) return true;
+          return new Date(e.created_at).getTime() > cutoff;
+        });
         return { complaints: rows.filter((e) => e.event_type === 'Complaint').length, total: rows.length };
       }
       throw new Error(`fakeDb.get: unhandled query: ${sql}`);
@@ -235,4 +244,76 @@ test('does not pause just below the 5% boundary', async () => {
   await pauseIfComplaintRateExceeded(db, 1);
   const paused = db.calls.run.some((c) => /UPDATE users SET sending_paused_at/.test(c.sql));
   assert.equal(paused, false);
+});
+
+// --- Important 2: the ratio is scoped to a 30-day sliding window ------------
+//
+// `sending_events` records ONLY bounces and complaints — extractDeliveryEvent
+// returns null for Delivery and Send — so this ratio is never "complaints per
+// message sent", it is "complaints per delivery problem". Over a lifetime
+// that ratchets: a tenant with 10,000 clean sends and 19 old bounces trips on
+// their first complaint, and the documented recovery
+// (`UPDATE users SET sending_paused_at = NULL`) does not hold, because the
+// lifetime ratio is still over threshold and the next complaint re-pauses
+// them immediately. Windowing is what makes recovery durable.
+
+const DAY_MS = 86400000;
+const daysAgo = (n) => new Date(Date.now() - n * DAY_MS).toISOString();
+
+function pausedIn(db) {
+  return db.calls.run.some((c) => /UPDATE users SET sending_paused_at/.test(c.sql));
+}
+
+test('events older than the 30-day window are excluded from the ratio', async () => {
+  // Lifetime this is 31/41 complaints — far over threshold and past the
+  // floor. Within the window it is a single event, below the sample floor.
+  const events = [
+    ...Array.from({ length: 30 }, () => ({ user_id: 1, event_type: 'Complaint', created_at: daysAgo(60) })),
+    ...Array.from({ length: 10 }, () => ({ user_id: 1, event_type: 'Bounce', created_at: daysAgo(45) })),
+    { user_id: 1, event_type: 'Complaint', created_at: daysAgo(1) }
+  ];
+  const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
+  await pauseIfComplaintRateExceeded(db, 1);
+  assert.equal(pausedIn(db), false, 'stale history must not keep a recovered tenant paused');
+});
+
+test('an event just inside the window still counts', async () => {
+  const events = Array.from({ length: 20 }, () => ({
+    user_id: 1, event_type: 'Complaint', created_at: daysAgo(29)
+  }));
+  const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
+  await pauseIfComplaintRateExceeded(db, 1);
+  assert.equal(pausedIn(db), true, '29 days old is inside a 30-day window');
+});
+
+test('the same events just outside the window do not count', async () => {
+  const events = Array.from({ length: 20 }, () => ({
+    user_id: 1, event_type: 'Complaint', created_at: daysAgo(31)
+  }));
+  const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
+  await pauseIfComplaintRateExceeded(db, 1);
+  assert.equal(pausedIn(db), false, '31 days old is outside a 30-day window');
+});
+
+test('the sample floor applies to the windowed count, not the lifetime count', async () => {
+  // 119 lifetime events would clear a floor of 20 easily; only 19 are in
+  // window, so the floor must still suppress the pause.
+  const events = [
+    ...Array.from({ length: 100 }, () => ({ user_id: 1, event_type: 'Bounce', created_at: daysAgo(90) })),
+    ...Array.from({ length: 19 }, () => ({ user_id: 1, event_type: 'Complaint', created_at: daysAgo(2) }))
+  ];
+  const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
+  await pauseIfComplaintRateExceeded(db, 1);
+  assert.equal(pausedIn(db), false, '19 in-window events is below the sample floor');
+});
+
+test('a tenant genuinely offending inside the window is still paused', async () => {
+  const events = [
+    ...Array.from({ length: 200 }, () => ({ user_id: 1, event_type: 'Bounce', created_at: daysAgo(120) })),
+    { user_id: 1, event_type: 'Complaint', created_at: daysAgo(3) },
+    ...Array.from({ length: 19 }, () => ({ user_id: 1, event_type: 'Bounce', created_at: daysAgo(3) }))
+  ];
+  const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
+  await pauseIfComplaintRateExceeded(db, 1);
+  assert.equal(pausedIn(db), true, '1/20 in window is at the 5% threshold');
 });

@@ -358,12 +358,32 @@ besoin dès qu'un tenant est mis en pause. Documenté ici pour qu'il n'ait pas
 (`backend/src/routes/sesWebhookRoutes.js`, fonction
 `pauseIfComplaintRateExceeded`) met un tenant en pause automatiquement dès
 que, sur un échantillon d'**au moins 20 événements** enregistrés
-(`COMPLAINT_SAMPLE_FLOOR = 20`), le taux de plaintes (`Complaint` /
-total) dépasse **5 %** (`COMPLAINT_RATE_THRESHOLD = 0.05`). À ce moment :
+(`COMPLAINT_SAMPLE_FLOOR = 20`) **au cours des 30 derniers jours**
+(`COMPLAINT_WINDOW_DAYS = 30`), le taux de plaintes (`Complaint` / total)
+dépasse **5 %** (`COMPLAINT_RATE_THRESHOLD = 0.05`). À ce moment :
 
 - `users.sending_paused_at` est renseigné (`CURRENT_TIMESTAMP`) ;
 - toutes ses campagnes `Active` passent à `Paused`
   (`UPDATE campaigns SET status = 'Paused' WHERE user_id = ? AND status = 'Active'`).
+
+**Ce que le dénominateur mesure exactement — à lire avant d'interpréter un
+chiffre.** La table `sending_events` ne contient **que** des `Bounce` et des
+`Complaint` : `extractDeliveryEvent` renvoie `null` pour `Delivery` et
+`Send`, et enregistrer ces événements-là est hors périmètre (cela
+multiplierait le volume de la table par ~100 et imposerait de reconfigurer
+l'abonnement SNS). Le ratio n'est donc **pas** « plaintes par message
+envoyé » mais « plaintes par incident de délivrabilité ». Un tenant avec
+10 000 envois parfaitement propres et 19 bounces sur la fenêtre sera mis en
+pause à sa première plainte : c'est attendu, mais cela veut dire qu'un
+déclenchement n'est pas en soi la preuve d'un abus. Toujours regarder le
+volume d'envoi réel (console SES / métriques CloudWatch du configuration
+set) avant de conclure.
+
+**Fenêtre glissante de 30 jours.** Le comptage est restreint à
+`created_at > now() - interval '30 days'`. Sans cette fenêtre le ratio était
+calculé sur toute la vie du compte et ne pouvait que monter : l'historique
+ancien restait indéfiniment au dénominateur *et* au numérateur, si bien
+qu'un tenant assaini ne redescendait jamais sous le seuil.
 
 **Effet.** Tant que `sending_paused_at` n'est pas `NULL`,
 `assertChannelSendable` (`backend/src/services/emailService.js`) bloque tout
@@ -387,3 +407,43 @@ Après cette mise à jour, le tenant (ou l'opérateur pour son compte) doit
 relancer manuellement ses campagnes restées en `Paused` depuis
 l'interface — la levée de `sending_paused_at` ne les remet pas `Active`
 automatiquement.
+
+**Cette levée tient-elle dans le temps ?** Oui, grâce à la fenêtre de
+30 jours — et c'est précisément ce qui ne fonctionnait pas avant elle. Avec
+un ratio calculé sur toute la vie du compte, remettre `sending_paused_at` à
+`NULL` ne durait que jusqu'à la plainte suivante : le ratio historique était
+toujours au-dessus du seuil, donc le webhook remettait le tenant en pause
+immédiatement. L'opérateur voyait sa correction « marcher », puis se défaire
+seule sans trace claire.
+
+Avec la fenêtre glissante, ce qui compte est le comportement des 30 derniers
+jours. Deux conséquences pratiques :
+
+1. **Si les plaintes viennent d'une campagne déjà arrêtée**, la levée est
+   définitive dès que ces événements sortent de la fenêtre. En attendant,
+   ils comptent encore : si le tenant est toujours au-dessus du seuil sur
+   les 30 derniers jours, il sera re-mis en pause à la prochaine plainte.
+   C'est le comportement voulu — ne pas contourner la fenêtre.
+2. **Pour vérifier avant de lever la pause**, exécuter le même comptage que
+   le webhook et confirmer que le tenant est bien redescendu :
+
+   ```sql
+   SELECT COUNT(*) FILTER (WHERE event_type = 'Complaint') AS complaints,
+          COUNT(*) AS total
+     FROM sending_events
+    WHERE user_id = <user_id>
+      AND created_at > now() - interval '30 days';
+   ```
+
+   Si `total < 20`, le plancher d'échantillon suffit à empêcher toute
+   nouvelle pause automatique. Sinon, vérifier que
+   `complaints / total < 0.05`. Si le ratio est encore au-dessus, lever la
+   pause maintenant ne tiendra pas : il faut attendre que les événements
+   fautifs sortent de la fenêtre, ou traiter la cause avant de reprendre
+   les envois.
+
+Le seuil (5 %), le plancher (20 événements) et la fenêtre (30 jours) sont
+les constantes `COMPLAINT_RATE_THRESHOLD`, `COMPLAINT_SAMPLE_FLOOR` et
+`COMPLAINT_WINDOW_DAYS` en tête de
+`backend/src/routes/sesWebhookRoutes.js` — les modifier en base est
+impossible, c'est un déploiement.

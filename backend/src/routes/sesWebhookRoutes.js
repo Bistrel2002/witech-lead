@@ -10,6 +10,25 @@ const router = express.Router();
 const COMPLAINT_RATE_THRESHOLD = 0.05;
 const COMPLAINT_SAMPLE_FLOOR = 20;
 
+/**
+ * Sliding window the complaint ratio is measured over.
+ *
+ * `sending_events` holds ONLY bounces and complaints — `extractDeliveryEvent`
+ * returns null for Delivery and Send, and recording those is deliberately out
+ * of scope (it would multiply this table's volume roughly a hundredfold and
+ * require reconfiguring the SNS subscription). So this ratio is not
+ * "complaints per message sent", it is "complaints per delivery problem", and
+ * over a lifetime it only ever ratchets upward: a tenant with 10,000 clean
+ * sends and 19 historical bounces is paused by their very first complaint.
+ *
+ * The window is also what makes the documented recovery
+ * (`UPDATE users SET sending_paused_at = NULL`) actually hold. Unwindowed,
+ * clearing the flag lasted exactly until the next complaint, because the
+ * lifetime ratio was still over threshold — the operator's fix would appear
+ * to work and then silently undo itself.
+ */
+const COMPLAINT_WINDOW_DAYS = 30;
+
 /** Timeout for the outbound GET that confirms an SNS subscription. */
 const SNS_CONFIRM_TIMEOUT_MS = 5000;
 
@@ -121,11 +140,14 @@ export function isValidWebhookToken(provided, expected) {
 }
 
 export async function pauseIfComplaintRateExceeded(db, userId) {
+  // The interval is interpolated from a module constant, never from input.
   const counts = await db.get(
     `SELECT
        COUNT(*) FILTER (WHERE event_type = 'Complaint') AS complaints,
        COUNT(*) AS total
-     FROM sending_events WHERE user_id = ?`,
+     FROM sending_events
+     WHERE user_id = ?
+       AND created_at > now() - interval '${COMPLAINT_WINDOW_DAYS} days'`,
     userId
   );
   const total = Number(counts?.total || 0);
@@ -141,7 +163,9 @@ export async function pauseIfComplaintRateExceeded(db, userId) {
     "UPDATE campaigns SET status = 'Paused' WHERE user_id = ? AND status = 'Active'",
     userId
   );
-  console.warn(`Sending: paused user ${userId} (${complaints}/${total} complaints)`);
+  console.warn(
+    `Sending: paused user ${userId} (${complaints}/${total} complaints in the last ${COMPLAINT_WINDOW_DAYS} days)`
+  );
 }
 
 async function defaultHttpGet(url) {
