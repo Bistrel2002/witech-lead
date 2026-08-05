@@ -2,6 +2,7 @@ import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
 import { runCampaignBackground } from './services/emailService.js';
+import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 
 const router = express.Router();
 
@@ -1114,6 +1115,32 @@ export function filterSettingsPayload(payload) {
   }
   return { accepted, rejected };
 }
+
+// Sending infrastructure status for the logged-in tenant.
+router.get('/sending-status', async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = await db.get(
+      'SELECT email, send_subdomain, send_subdomain_status, sending_paused_at FROM users WHERE id = ?',
+      req.user.id
+    );
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+
+    let status = user.send_subdomain_status || 'pending';
+    if (status !== 'verified') {
+      status = await refreshTenantSendingStatus(req.user.id, db);
+    }
+
+    res.json({
+      status,
+      subdomain: user.send_subdomain,
+      replyTo: user.email,
+      pausedAt: user.sending_paused_at || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Get all settings
 router.get('/settings', async (req, res) => {

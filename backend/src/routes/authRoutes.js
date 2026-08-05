@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { getDb } from '../database/db.js';
 import { authenticateUser } from '../middlewares/authMiddleware.js';
+import { ensureTenantSendingDomain } from '../services/tenantProvisioning.js';
 
 const router = express.Router();
 
@@ -63,6 +64,10 @@ router.post('/signup', async (req, res) => {
     );
 
     const user = { id: result.lastID, email, name, role, phone: phone || null };
+
+    // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+    ensureTenantSendingDomain(user.id, db);
+
     const token = generateToken(user);
 
     res.cookie('auth_token', token, {
@@ -330,6 +335,9 @@ router.get('/google/mock-callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      ensureTenantSendingDomain(user.id, db);
     }
 
     const token = generateToken(user);
@@ -400,6 +408,9 @@ router.get('/google/callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      ensureTenantSendingDomain(user.id, db);
     } else if (!user.google_id) {
       await db.run('UPDATE users SET google_id = ? WHERE id = ?', google_id, user.id);
       user.google_id = google_id;

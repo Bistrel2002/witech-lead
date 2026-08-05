@@ -158,6 +158,9 @@ async function initPostgresDb(db) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS company_website TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS sender_signature TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS send_subdomain TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS send_subdomain_status VARCHAR(20) DEFAULT 'pending';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS sending_paused_at TIMESTAMP;
   `);
 
   // Create leads table
