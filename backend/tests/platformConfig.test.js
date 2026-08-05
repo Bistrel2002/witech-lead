@@ -11,14 +11,30 @@ const REQUIRED = {
   SES_WEBHOOK_TOKEN: 'webhook-secret-test-token'
 };
 
+/**
+ * `undefined` in an override means "this variable is absent", which is the
+ * only thing the missing-variable tests below actually care about. It must be
+ * a real `delete`: `process.env.X = undefined` stringifies to the *truthy*
+ * string "undefined", so the config guard would see the variable as present
+ * and those tests would silently assert nothing.
+ *
+ * Restoration mutates the existing `process.env` in place rather than
+ * reassigning it — reassigning replaces the object for the whole process and
+ * leaks state ordering between test files.
+ */
 function withEnv(overrides, fn) {
   const saved = { ...process.env };
-  Object.assign(process.env, REQUIRED, overrides);
+  Object.assign(process.env, REQUIRED);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   resetPlatformConfigCache();
   try {
     return fn();
   } finally {
-    process.env = saved;
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, saved);
     resetPlatformConfigCache();
   }
 }

@@ -5,9 +5,12 @@ let pgPoolInstance = null;
 
 // Database Adapter for PostgreSQL
 class DatabaseAdapter {
-  constructor(client) {
+  constructor(client, { reserved = false } = {}) {
     this.client = client;
     this.isPg = true; // Kept for backward compatibility checks
+    // True when `client` is a single checked-out connection rather than a
+    // pool, i.e. we are already inside a transaction.
+    this.reserved = reserved;
   }
 
   _convertSql(sql) {
@@ -54,6 +57,40 @@ class DatabaseAdapter {
   async exec(sql) {
     await this.client.query(sql);
   }
+
+  /**
+   * Runs `fn` against an adapter bound to one reserved connection, wrapped in
+   * BEGIN/COMMIT (ROLLBACK on throw).
+   *
+   * The reservation is the whole point: `pg.Pool.query()` checks out a
+   * connection per call and returns it immediately, so issuing BEGIN, the
+   * writes, and COMMIT as separate pool queries can spread them across
+   * different backends — the BEGIN would isolate nothing and the writes would
+   * each autocommit. Anything needing atomicity must go through here.
+   */
+  async transaction(fn) {
+    if (this.reserved || typeof this.client.connect !== 'function') {
+      // Already inside a transaction: join the caller's rather than nesting.
+      return fn(this);
+    }
+    const client = await this.client.connect();
+    const scoped = new DatabaseAdapter(client, { reserved: true });
+    try {
+      await client.query('BEGIN');
+      const result = await fn(scoped);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Database: ROLLBACK failed:', rollbackError.message);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export async function getDb() {
@@ -92,8 +129,18 @@ export async function getFrenchDb() {
 /**
  * One-time backfill: copies the legacy global branding rows (company_name,
  * company_website, sender_signature — which used to live in `settings`)
- * onto every user who doesn't already have their own value, then deletes
- * those rows from `settings`.
+ * onto the OLDEST user, then deletes those rows from `settings`.
+ *
+ * "Oldest user only" is the entire correctness condition. Those legacy
+ * `settings` rows are one specific person's branding: whoever was using the
+ * product back when branding was global — the first registered account.
+ * Copying them onto every user with NULL branding would stamp that tenant's
+ * signature, company name and website permanently onto every other tenant's
+ * row, so every one of them would start mailing prospects under someone
+ * else's identity. That is the exact cross-tenant leak this migration exists
+ * to close, and doing it in a backfill would bake it into per-tenant data
+ * where no later fix can distinguish it from a value the tenant chose. The
+ * `user_id` backfill further down this file scopes itself the same way.
  *
  * The DELETE is not optional cleanup: `initPostgresDb` runs on every server
  * boot, not once. Without it, a customer who signs up between two boots
@@ -116,23 +163,29 @@ export async function backfillLegacyBranding(db) {
     acc[row.key] = row.value;
     return acc;
   }, {});
-  await db.run(
-    `UPDATE users
-       SET company_name     = COALESCE(company_name, ?),
-           company_website  = COALESCE(company_website, ?),
-           sender_signature = COALESCE(sender_signature, ?)
-     WHERE company_name IS NULL
-        OR company_website IS NULL
-        OR sender_signature IS NULL`,
-    legacy.company_name || null,
-    legacy.company_website || null,
-    legacy.sender_signature || null
-  );
+  // Atomic: if the DELETE landed without the UPDATE the legacy branding would
+  // be lost for good, and if the UPDATE landed without the DELETE the next
+  // boot would replay the copy against whatever rows are NULL by then.
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `UPDATE users
+         SET company_name     = COALESCE(company_name, ?),
+             company_website  = COALESCE(company_website, ?),
+             sender_signature = COALESCE(sender_signature, ?)
+       WHERE id = (SELECT MIN(id) FROM users)
+         AND (company_name IS NULL
+              OR company_website IS NULL
+              OR sender_signature IS NULL)`,
+      legacy.company_name || null,
+      legacy.company_website || null,
+      legacy.sender_signature || null
+    );
 
-  // Retire the legacy rows so this function is a no-op on every future boot.
-  await db.run(
-    "DELETE FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
-  );
+    // Retire the legacy rows so this function is a no-op on every future boot.
+    await tx.run(
+      "DELETE FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+    );
+  });
 }
 
 async function initPostgresDb(db) {
