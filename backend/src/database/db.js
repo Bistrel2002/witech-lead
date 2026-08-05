@@ -225,6 +225,21 @@ async function initPostgresDb(db) {
     )
   `);
 
+  // Bounce/complaint feedback from SES, used to auto-pause abusive tenants.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS sending_events (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      event_type VARCHAR(30) NOT NULL,
+      recipient VARCHAR(255),
+      sending_domain VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sending_events_user ON sending_events(user_id, event_type);
+  `);
+
   // Create lead_discussions table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS lead_discussions (

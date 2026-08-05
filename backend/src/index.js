@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import apiRouter from './routes.js';
 import authRouter from './routes/authRoutes.js';
 import portalRouter from './routes/portalRoutes.js';
+import sesWebhookRouter from './routes/sesWebhookRoutes.js';
 import { getDb } from './database/db.js';
 import { authenticateUser } from './middlewares/authMiddleware.js';
 
@@ -47,6 +48,9 @@ app.use('/api/auth', authRouter);
 
 // Portal Routes (Password/Role restricted)
 app.use('/api/portal', portalRouter);
+
+// AWS SNS delivers SES events unauthenticated and as text/plain.
+app.use('/api/ses', express.text({ type: '*/*' }), sesWebhookRouter);
 
 // API Routes (General CRM operations - Protected by User Login)
 app.use('/api', authenticateUser, apiRouter);
