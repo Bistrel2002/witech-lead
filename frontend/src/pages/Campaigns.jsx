@@ -15,7 +15,6 @@ import {
   ChevronRight,
   ExternalLink,
   Edit2,
-  MessageSquare,
   Smartphone
 } from 'lucide-react';
 
@@ -356,7 +355,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       <div>
         <h2 className="text-2xl font-heading font-extrabold text-slate-800">Campagnes d'Outreach</h2>
         <p className="text-slate-500 text-sm mt-1">
-          Configurez vos modèles et lancez des campagnes automatisées par Email, SMS ou WhatsApp.
+          Configurez vos modèles et lancez des campagnes automatisées par Email ou SMS.
         </p>
       </div>
 
@@ -504,7 +503,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Canal de Prospection *</label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'email' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
@@ -520,14 +519,6 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   >
                     <Smartphone className="w-5 h-5 mb-1.5" />
                     SMS
-                  </button>
-                  <button
-                    type="button"
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'whatsapp' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
-                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'whatsapp', category: '' })}
-                  >
-                    <MessageSquare className="w-5 h-5 mb-1.5" />
-                    WhatsApp
                   </button>
                 </div>
               </div>
@@ -644,7 +635,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 <p className="text-slate-500 text-[11px] leading-normal">
                   {newCampaign.channel === 'email' 
                     ? "Les e-mails seront envoyés automatiquement via votre connexion SMTP avec une temporisation d'envoi pour protéger votre domaine."
-                    : "Les messages mobiles (SMS/WhatsApp) seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
+                    : "Les messages SMS seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
                 </p>
               </div>
 
