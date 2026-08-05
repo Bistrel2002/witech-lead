@@ -634,7 +634,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 </h5>
                 <p className="text-slate-500 text-[11px] leading-normal">
                   {newCampaign.channel === 'email' 
-                    ? "Les e-mails seront envoyés automatiquement via votre connexion SMTP avec une temporisation d'envoi pour protéger votre domaine."
+                    ? "Les e-mails seront envoyés automatiquement depuis votre infrastructure d'envoi dédiée, avec une temporisation pour protéger votre réputation."
                     : "Les messages SMS seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
                 </p>
               </div>
