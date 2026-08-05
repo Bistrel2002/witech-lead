@@ -70,14 +70,21 @@ export function compileTemplate(text, data) {
   if (!text) return '';
   let compiled = text;
 
+  // Sender-side fallbacks must never name the operator. This text goes out
+  // under the TENANT's name, from the TENANT's subdomain, to the TENANT's
+  // prospects — so defaulting to "Wi'Tech Agency" / "L'équipe Wi'Tech" put
+  // the platform operator's agency name inside a paying customer's outbound
+  // mail, and did it precisely for the customers who had configured the
+  // least. Derive the fallback from the tenant, or say nothing.
+  const senderName = data.sender_name || '';
   const replacements = {
     company_name: data.company_name || 'votre entreprise',
     website: data.website || 'votre site internet',
     phone: data.phone || 'votre numéro',
     city: data.city || 'votre ville',
-    sender_name: data.sender_name || "Wi'Tech Agency",
+    sender_name: senderName,
     sender_phone: data.sender_phone || '',
-    sender_signature: data.sender_signature || "Cordialement,\nL'équipe Wi'Tech"
+    sender_signature: data.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,')
   };
 
   Object.entries(replacements).forEach(([key, val]) => {
@@ -187,7 +194,8 @@ export async function runCampaignBackground(campaignId) {
           website: prospect.website,
           phone: prospect.phone,
           city: prospect.city,
-          sender_name: campaign.user_name || "Wi'Tech Agency",
+          // Not the operator's name: see the fallback note in compileTemplate.
+          sender_name: campaign.user_name || '',
           sender_phone: campaign.user_phone || '',
           sender_signature: campaign.user_signature || ''
         };

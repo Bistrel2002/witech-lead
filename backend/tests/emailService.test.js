@@ -63,6 +63,41 @@ test('compileTemplate substitutes the sender signature', () => {
   assert.equal(out, 'Bonjour Plomberie Dupont\nCordialement, Alice');
 });
 
+// --- Minor 12: no fallback may name the platform operator ------------------
+
+test('a tenant with no signature falls back to their own name, not the operator', () => {
+  // This mail leaves under the tenant's name and their own subdomain. Signing
+  // it "L'équipe Wi'Tech" put the operator's agency into a paying customer's
+  // outbound prospecting — and only ever for the customers who had configured
+  // the least.
+  const out = compileTemplate('{{sender_signature}}', {
+    sender_name: 'Alice Martin',
+    sender_signature: ''
+  });
+  assert.equal(out, 'Cordialement,\nAlice Martin');
+});
+
+test('a tenant with neither signature nor name gets a neutral sign-off', () => {
+  const out = compileTemplate('{{sender_signature}}', {});
+  assert.equal(out, 'Cordialement,');
+});
+
+test('no sender-side fallback ever mentions the operator', () => {
+  const out = compileTemplate(
+    '{{sender_name}}|{{sender_signature}}|{{sender_phone}}',
+    { company_name: 'Plomberie Dupont' }
+  );
+  assert.doesNotMatch(out, /Wi'Tech/i);
+});
+
+test('an explicit signature is still used verbatim', () => {
+  const out = compileTemplate('{{sender_signature}}', {
+    sender_name: 'Alice Martin',
+    sender_signature: "Bien à vous,\nAlice — Agence Alice"
+  });
+  assert.equal(out, "Bien à vous,\nAlice — Agence Alice");
+});
+
 const verified = { send_subdomain: '7.mail.witechagency.com', send_subdomain_status: 'verified', sending_paused_at: null };
 
 test('a verified tenant may send email', () => {

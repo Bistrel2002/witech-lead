@@ -1,10 +1,66 @@
 import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
-import { runCampaignBackground } from './services/emailService.js';
+import { runCampaignBackground, assertChannelSendable } from './services/emailService.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 
 const router = express.Router();
+
+/** Channels the platform can actually deliver on. */
+export const SUPPORTED_CHANNELS = new Set(['email', 'sms']);
+
+/**
+ * Validates a campaign channel at creation time.
+ *
+ * Storing an unusable channel used to be accepted silently and only surfaced
+ * deep inside the background run, where the throw becomes status='Failed'
+ * with no explanation the customer can see.
+ */
+export function validateChannel(channel) {
+  if (channel === undefined || channel === null || channel === '') {
+    return { ok: true, channel: 'email' };
+  }
+  const normalized = typeof channel === 'string' ? channel.trim().toLowerCase() : channel;
+  if (typeof normalized !== 'string' || !SUPPORTED_CHANNELS.has(normalized)) {
+    return {
+      ok: false,
+      error: `Canal non supporté : ${String(channel)}. Canaux disponibles : email, sms.`
+    };
+  }
+  return { ok: true, channel: normalized };
+}
+
+/**
+ * Resolves a campaign only if it belongs to `userId`, else null.
+ *
+ * Any route that writes campaign_logs or campaigns on behalf of a
+ * client-supplied campaignId must go through this. Without it, tenant A can
+ * queue their own leads into tenant B's campaign: B's SES identity then mails
+ * A's prospects, and the complaints that follow count toward B's auto-pause.
+ */
+export async function findOwnedCampaign(db, campaignId, userId) {
+  if (campaignId === undefined || campaignId === null || campaignId === '') return null;
+  const campaign = await db.get(
+    'SELECT * FROM campaigns WHERE id = ? AND user_id = ?',
+    campaignId, userId
+  );
+  return campaign || null;
+}
+
+/**
+ * The campaign joined with the sending state `assertChannelSendable` needs, so
+ * POST /campaigns/:id/start can refuse synchronously with a real reason
+ * instead of returning 200 and failing invisibly in the background.
+ */
+export async function loadCampaignForStart(db, campaignId, userId) {
+  return db.get(
+    `SELECT c.*, u.send_subdomain, u.send_subdomain_status, u.sending_paused_at
+       FROM campaigns c
+       LEFT JOIN users u ON c.user_id = u.id
+      WHERE c.id = ? AND c.user_id = ?`,
+    campaignId, userId
+  );
+}
 
 // Database-level deduplication cleanup helper
 export async function eliminateDuplicates(db) {
@@ -99,7 +155,15 @@ router.all('/leads/french-db-lookup', async (req, res) => {
   try {
     const fDb = await getFrenchDb();
     const db = await getDb();
-    
+
+    // campaignId arrives from the client and drives writes to campaign_logs
+    // and campaigns below, so it must be proven to belong to this tenant
+    // before any of that work starts — every other campaign route in this
+    // file scopes by user_id the same way.
+    if (campaignId && !(await findOwnedCampaign(db, campaignId, req.user.id))) {
+      return res.status(404).json({ error: 'Campagne introuvable ou non autorisée.' });
+    }
+
     // Check if french_businesses table exists
     let hasTable = true;
     try {
@@ -688,6 +752,13 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
 
   try {
     const db = await getDb();
+
+    // Same client-supplied campaignId, same requirement: check ownership
+    // before scraping, so a cross-tenant attempt costs nothing either.
+    if (campaignId && !(await findOwnedCampaign(db, campaignId, req.user.id))) {
+      return res.status(404).json({ error: 'Campagne introuvable ou non autorisée.' });
+    }
+
     const result = await scrapeGoogleMapsFromLink(mapsUrl, category, city, radius, maxLeads);
     const finalCategory = result.category;
     const finalCity = result.city;
@@ -929,6 +1000,11 @@ router.post('/campaigns', async (req, res) => {
     return res.status(400).json({ error: 'Campaign name and template_id are required' });
   }
 
+  const channelCheck = validateChannel(channel);
+  if (!channelCheck.ok) {
+    return res.status(400).json({ error: channelCheck.error });
+  }
+
   try {
     const db = await getDb();
 
@@ -958,7 +1034,7 @@ router.post('/campaigns', async (req, res) => {
     // Insert Campaign
     const result = await db.run(
       'INSERT INTO campaigns (user_id, name, template_id, total_leads, channel) VALUES (?, ?, ?, ?, ?)',
-      req.user.id, name, template_id, targets.length, channel || 'email'
+      req.user.id, name, template_id, targets.length, channelCheck.channel
     );
     const campaignId = result.lastID;
 
@@ -1012,14 +1088,31 @@ router.post('/campaigns/:id/start', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ? AND user_id = ?', id, req.user.id);
+    const campaign = await loadCampaignForStart(db, id, req.user.id);
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
+    // Refuse synchronously, with the reason, while the customer is still
+    // looking at the result of their click.
+    //
+    // runCampaignBackground checks this too, but by then this route has
+    // already answered 200 "started": the throw is caught deep in the
+    // background run, logged to the server console and turned into
+    // status='Failed' with no explanation anywhere the customer can reach.
+    // A new customer whose DKIM has not propagated yet would see their first
+    // campaign report success and then sit at Failed with no reason given.
+    // The background check stays as defence in depth — state can change
+    // between this call and the run.
+    try {
+      assertChannelSendable(campaign, campaign.channel || 'email');
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
     // Update status to Active
     await db.run("UPDATE campaigns SET status = 'Active' WHERE id = ? AND user_id = ?", id, req.user.id);
-    
+
     // Trigger in the background
     runCampaignBackground(parseInt(id));
 
@@ -1051,9 +1144,18 @@ router.post('/campaigns/:id/restart', async (req, res) => {
   const { id } = req.params;
   try {
     const db = await getDb();
-    const campaign = await db.get('SELECT * FROM campaigns WHERE id = ? AND user_id = ?', id, req.user.id);
+    const campaign = await loadCampaignForStart(db, id, req.user.id);
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    // Restart re-enters exactly the same background run as start, so it needs
+    // the same synchronous refusal — otherwise "Relancer" on a campaign that
+    // failed for a sending reason just reproduces the silent failure.
+    try {
+      assertChannelSendable(campaign, campaign.channel || 'email');
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
     }
 
     if (campaign.status === 'Completed') {
