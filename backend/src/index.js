@@ -7,6 +7,7 @@ import authRouter from './routes/authRoutes.js';
 import portalRouter from './routes/portalRoutes.js';
 import sesWebhookRouter from './routes/sesWebhookRoutes.js';
 import { getDb } from './database/db.js';
+import { getPlatformConfig } from './config/platformConfig.js';
 import { authenticateUser } from './middlewares/authMiddleware.js';
 
 dotenv.config();
@@ -63,6 +64,31 @@ app.get('/', (req, res) => {
 // Start Server and Init DB
 async function bootstrap() {
   try {
+    // Fail loudly here rather than silently per-customer later.
+    //
+    // Every consumer of the platform config calls getPlatformConfig() lazily
+    // and swallows the throw, so a deploy missing AWS_REGION,
+    // MAIL_ROOT_DOMAIN, the Twilio triple or SES_WEBHOOK_TOKEN used to boot,
+    // pass its health check and look completely healthy — while being unable
+    // to send anything and unable to attribute a single bounce. The first
+    // signal was a customer complaining. The thrown message already names
+    // every missing variable.
+    console.log("Validating platform configuration...");
+    try {
+      getPlatformConfig();
+      console.log("Platform configuration OK.");
+    } catch (configError) {
+      if (process.env.NODE_ENV === 'production') throw configError;
+      // Local dev must stay bootable without real AWS/Twilio credentials —
+      // .env.example deliberately ships those blank — but the warning is loud
+      // enough that nobody mistakes a half-configured box for a working one.
+      console.warn("====================================================");
+      console.warn("⚠️  Platform configuration incomplete — outreach sending will NOT work.");
+      console.warn(`   ${configError.message}`);
+      console.warn("   Tolerated because NODE_ENV is not 'production'. A production boot aborts here.");
+      console.warn("====================================================");
+    }
+
     console.log("Initializing database connection...");
     const db = await getDb();
     console.log("Database initialized successfully!");

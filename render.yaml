@@ -43,6 +43,48 @@ services:
         sync: false  # You'll set this to the backend's own URL
       - key: VITE_MOCK_AUTH
         value: "false"  # Disable dev bypass in production!
+
+      # ── Platform outreach infrastructure (operator-owned) ──────────
+      # bootstrap() calls getPlatformConfig() and aborts the boot in
+      # production if any of the six required keys below is missing.
+      # Without them a deploy from this blueprint used to come up healthy,
+      # pass its health check, and silently be unable to send a single
+      # campaign or attribute a single bounce.
+      # Every one is `sync: false`, so Render prompts at deploy time and no
+      # secret value is ever committed to this file.
+      # See docs/platform-setup.md for how to obtain each of them.
+
+      # Required — the boot fails without these.
+      - key: AWS_REGION
+        sync: false  # e.g. eu-west-3
+      - key: MAIL_ROOT_DOMAIN
+        sync: false  # e.g. mail.witechagency.com — must be delegated to Route53
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_SENDER_ID
+        sync: false  # Shared alphanumeric Sender ID, e.g. WITECH
+      - key: SES_WEBHOOK_TOKEN
+        sync: false  # Long random string; the SNS subscription URL must carry
+                     # the same value as ?token=... — it is the only thing
+                     # stopping anyone from posting fake complaint events.
+
+      # Required in practice — provisioning and bounce attribution need these.
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: ROUTE53_HOSTED_ZONE_ID
+        sync: false  # Hosted zone for MAIL_ROOT_DOMAIN. Provisioning a tenant
+                     # subdomain throws without it.
+      - key: SES_CONFIGURATION_SET
+        sync: false  # Routes bounce/complaint events to SNS. Optional in code,
+                     # but no auto-pause happens without it.
+
+      # Optional — defaults to no-reply.
+      - key: MAIL_FROM_LOCAL_PART
+        sync: false
     healthCheckPath: /
 
   # ── Frontend (Vite Static Site) ───────────────────────────────
