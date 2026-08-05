@@ -23,12 +23,48 @@ export function parseSnsNotification(rawBody) {
   };
 }
 
+/**
+ * Normalises an SES `mail.source` into the key stored in
+ * `users.send_subdomain`.
+ *
+ * Two independent things stop a naive `source.split('@')[1]` from ever
+ * matching, and both fail *silently* — no throw, no error log, just an empty
+ * `sending_events` table and a tenant who is never auto-paused:
+ *
+ *  1. SES may echo the formatted Source header verbatim, e.g.
+ *     `"Alice Martin" <no-reply@7.mail.witechagency.com>` (exactly what
+ *     `buildEmailPayload` puts on the wire), leaving a trailing `>` glued to
+ *     the domain. Splitting on the FIRST '@' additionally breaks on any
+ *     display name containing one, so take everything after the LAST '@'.
+ *  2. AWS documents `mail.source` as the envelope MAIL FROM, and
+ *     `provisionSendingDomain` configures a custom MAIL FROM of
+ *     `bounce.{subdomain}` for SPF alignment — so the envelope form carries
+ *     one extra leading label that the SES identity does not. Tenant
+ *     subdomains are `{numericUserId}.{rootDomain}`, so a genuine one can
+ *     never itself begin with `bounce.`; stripping it is unambiguous.
+ */
+export function extractSendingDomain(source) {
+  if (!source) return null;
+  const raw = String(source).trim();
+  const at = raw.lastIndexOf('@');
+  if (at === -1) return null;
+
+  const domain = raw
+    .slice(at + 1)
+    .replace(/[<>\s]/g, '')
+    .replace(/\.$/, '') // a fully-qualified trailing dot
+    .toLowerCase();
+  if (!domain) return null;
+
+  return domain.replace(/^bounce\./, '');
+}
+
 export function extractDeliveryEvent(message) {
   if (!message || !message.eventType) return null;
   const source = message.mail?.source;
   if (!source) return null;
 
-  const sendingDomain = source.split('@')[1] || null;
+  const sendingDomain = extractSendingDomain(source);
   if (!sendingDomain) return null;
 
   if (message.eventType === 'Complaint') {
@@ -160,7 +196,18 @@ export async function handleSesEvent(req, res, deps = {}) {
 
     const db = await getDbFn();
     const user = await db.get('SELECT id FROM users WHERE send_subdomain = ?', event.sendingDomain);
-    if (!user) return res.status(200).send('unknown domain');
+    if (!user) {
+      // Never let this path stay quiet. A parser that stops matching
+      // `send_subdomain` produces exactly this branch for EVERY event, with
+      // no exception and no error status — `sending_events` simply stays
+      // empty and no tenant is ever paused. Without a log line the first
+      // symptom is AWS suspending the platform's whole SES account.
+      console.warn(
+        `SES webhook: no tenant matches sending domain "${event.sendingDomain}" ` +
+        `(${event.eventType} event, source "${parsed.message?.mail?.source}") — event dropped`
+      );
+      return res.status(200).send('unknown domain');
+    }
 
     // SNS delivers at-least-once: a redelivered notification must not be
     // counted twice toward the complaint threshold, or AWS's own retry
