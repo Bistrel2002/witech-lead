@@ -14,10 +14,18 @@ export async function ensureTenantSendingDomain(userId, db, deps = {}) {
     );
   } catch (error) {
     console.error(`Provisioning: failed for user ${userId}:`, error.message);
-    await db.run(
-      'UPDATE users SET send_subdomain_status = ? WHERE id = ?',
-      'failed', userId
-    );
+    // This write must never throw either: every call site invokes this
+    // function fire-and-forget (no await, no .catch()), so an unguarded
+    // rejection here would surface as an unhandledRejection and crash the
+    // whole server for every tenant, not just the one whose signup failed.
+    try {
+      await db.run(
+        'UPDATE users SET send_subdomain_status = ? WHERE id = ?',
+        'failed', userId
+      );
+    } catch (writeError) {
+      console.error(`Provisioning: failed to persist failure status for user ${userId}:`, writeError.message);
+    }
   }
 }
 

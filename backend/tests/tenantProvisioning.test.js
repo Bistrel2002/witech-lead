@@ -58,3 +58,18 @@ test('refresh returns pending when the user has no subdomain yet', async () => {
   assert.equal(status, 'pending');
   assert.equal(db.calls.length, 0, 'must not write a status it never checked');
 });
+
+test('never rejects even when persisting the failure status also fails', async () => {
+  // Simulates a transient DB error (pool exhaustion, connection drop, statement
+  // timeout, ...) hitting the write that records the 'failed' status itself.
+  // All three call sites (signup, Google mock-callback, Google callback) invoke
+  // this fire-and-forget with no await/.catch(), so if this rejects it becomes
+  // an unhandledRejection and can crash the whole server for every tenant.
+  const db = {
+    async run() { throw new Error('connection terminated unexpectedly'); },
+    async get() { return { send_subdomain: null }; }
+  };
+  await assert.doesNotReject(() => ensureTenantSendingDomain(9, db, {
+    provision: async () => { throw new Error('AWS down'); }
+  }));
+});
