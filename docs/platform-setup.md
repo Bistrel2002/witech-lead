@@ -8,9 +8,12 @@ compte AWS, déléguer le DNS, ni enregistrer le Sender ID Twilio à votre place
 
 Tant que les étapes 1 à 5 ci-dessous n'ont pas été exécutées avec de vrais
 identifiants AWS et Twilio, l'état honnête du système est : les tests
-unitaires passent, le serveur démarre, le provisioning est tenté à
-l'inscription et se retrouve en `pending` ou `failed`, et **aucun e-mail ne
-part réellement**. Ne considérez la fonctionnalité comme opérationnelle
+unitaires passent, le provisioning est tenté à l'inscription et se retrouve
+en `pending` ou `failed`, et **aucun e-mail ne part réellement**. En
+production le serveur **refuse désormais de démarrer** si l'une des six
+variables de `REQUIRED_VARS` manque (`bootstrap()` appelle
+`getPlatformConfig()`, voir plus bas) ; hors production il démarre en
+affichant un avertissement. Ne considérez la fonctionnalité comme opérationnelle
 qu'après qu'une vraie campagne a été envoyée à un vrai destinataire et
 qu'une réponse est arrivée dans la boîte du tenant.
 
@@ -20,9 +23,15 @@ La liste ci-dessous a été relue directement dans
 `backend/src/config/platformConfig.js` (fonction `getPlatformConfig`), pas
 recopiée depuis la spec — c'est la source de vérité.
 
-### Obligatoires (le serveur refuse de démarrer/traiter une requête sans elles)
+### Obligatoires (le serveur refuse de démarrer sans elles)
 
-`REQUIRED_VARS` dans `platformConfig.js` :
+`REQUIRED_VARS` dans `platformConfig.js`. `bootstrap()`
+(`backend/src/index.js`) appelle `getPlatformConfig()` avant même d'ouvrir
+la connexion base : en production, une seule de ces variables manquante
+**arrête le démarrage**, avec un message qui les nomme toutes. Hors
+production (`NODE_ENV !== 'production'`) le démarrage continue après un
+avertissement, pour que le dev local reste possible sans identifiants AWS
+ni Twilio réels.
 
 | Variable | Rôle |
 |---|---|
@@ -50,12 +59,18 @@ recopiée depuis la spec — c'est la source de vérité.
 
 | Variable | Où elle est lue | Rôle |
 |---|---|---|
-| `ROUTE53_HOSTED_ZONE_ID` | `backend/src/services/sendingDomainService.js` (`ChangeResourceRecordSetsCommand`) | Zone Route53 dans laquelle les enregistrements DKIM/MAIL FROM sont écrits. **Non listée dans `REQUIRED_VARS`** : si elle est absente, le provisioning échoue à l'appel Route53 (capturé et journalisé comme `send_subdomain_status = 'failed'`) plutôt qu'au démarrage du serveur. Ne comptez pas sur un crash au boot pour la détecter — vérifiez-la explicitement. |
+| `ROUTE53_HOSTED_ZONE_ID` | `backend/src/services/sendingDomainService.js` (`ChangeResourceRecordSetsCommand`) | Zone Route53 dans laquelle les enregistrements DKIM/MAIL FROM sont écrits. **Non listée dans `REQUIRED_VARS`** : si elle est absente, le provisioning échoue à l'appel Route53 (capturé et journalisé comme `send_subdomain_status = 'failed'`) plutôt qu'au démarrage du serveur. Ne comptez pas sur un crash au boot pour la détecter — vérifiez-la explicitement. Les tenants tombés en `failed` pour cette raison sont rattrapables sans intervention en base : voir l'étape 4, `refreshTenantSendingStatus` re-provisionne. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Chaîne de credentials par défaut du SDK AWS (`SESv2Client`, `Route53Client`) | Ne sont lues nulle part dans le code applicatif — le SDK AWS les prend directement dans `process.env` (ou un rôle IAM/instance profile). Toujours nécessaires en pratique sauf si le backend tourne déjà sous un rôle IAM. |
 
 Toutes ces variables sont déjà présentes dans `.env.example` sous la section
 « 4. Platform Outreach Infrastructure » et « 5. Shared Twilio account » ; ce
 document ne fait qu'expliquer comment leur donner de vraies valeurs.
+
+Elles sont également déclarées dans `render.yaml` (service
+`witech-lead-api`), toutes en `sync: false` : Render les demande au moment
+du déploiement et **aucune valeur secrète n'est versionnée**. Un déploiement
+depuis le blueprint sans les renseigner échouera au démarrage plutôt que de
+produire un serveur en apparence sain mais incapable d'envoyer.
 
 ---
 
@@ -339,6 +354,27 @@ Une fois les étapes 1 à 5 effectuées :
    le temps que SES valide les CNAME DKIM propagés. Cette route rappelle
    `refreshTenantSendingStatus` tant que le statut stocké n'est pas déjà
    `verified`.
+
+   `refreshTenantSendingStatus` **re-provisionne** aussi le tenant si
+   `send_subdomain` est `NULL` ou si le statut stocké est `failed` : c'est
+   le chemin de rattrapage pour un compte dont le provisioning a échoué à
+   l'inscription (throttle AWS, clé expirée, `ROUTE53_HOSTED_ZONE_ID`
+   absente). Le bouton « Actualiser » de l'écran *Configurations & Outils*
+   déclenche exactement cet appel. Deux garde-fous encadrent les appels AWS,
+   tous deux dans `backend/src/services/tenantProvisioning.js` :
+
+   - `STATUS_CACHE_TTL_MS` (30 s) — le statut résolu est réutilisé, donc
+     rafraîchir en boucle n'enchaîne pas les `GetEmailIdentity` (quota
+     SESv2 partagé par tout le compte) ;
+   - `PROVISION_RETRY_COOLDOWN_MS` (5 min) — délai minimum entre deux
+     tentatives de re-provisioning pour un même tenant.
+
+   Conséquence opérationnelle : après avoir corrigé la cause d'un échec
+   (par exemple renseigner `ROUTE53_HOSTED_ZONE_ID` et redéployer), il
+   suffit d'attendre la fin du cooldown puis de rappeler la route — inutile
+   de toucher la base. Tout résultat est écrit en base, donc le statut
+   retourné par l'API et `users.send_subdomain_status` ne peuvent plus
+   diverger.
 
 5. **Ne déclarer la fonctionnalité opérationnelle** qu'après l'envoi d'une
    vraie campagne à un vrai destinataire externe et la réception d'une
