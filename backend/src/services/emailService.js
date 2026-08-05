@@ -1,41 +1,65 @@
-import nodemailer from 'nodemailer';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import twilio from 'twilio';
 import { getDb } from '../database/db.js';
+import { getPlatformConfig } from '../config/platformConfig.js';
+import { buildFromAddress } from './sendingDomainService.js';
 
-/**
- * Creates a Nodemailer transport from SMTP configurations
- */
-function createTransport(smtpConfig) {
-  const port = parseInt(smtpConfig.smtp_port) || 587;
-  const isSecure = port === 465;
+let sesClientInstance = null;
 
-  return nodemailer.createTransport({
-    host: smtpConfig.smtp_host,
-    port: port,
-    secure: isSecure,
-    auth: {
-      user: smtpConfig.smtp_user,
-      pass: smtpConfig.smtp_pass
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+function getSesClient() {
+  if (!sesClientInstance) {
+    sesClientInstance = new SESv2Client({ region: getPlatformConfig().aws.region });
+  }
+  return sesClientInstance;
 }
 
 /**
- * Tests connection with SMTP settings
+ * Quotes are stripped rather than escaped: a display name is cosmetic, and
+ * stripping is the one transformation that cannot produce a malformed header.
  */
-export async function testSmtpConnection(config) {
-  try {
-    if (!config.smtp_host || !config.smtp_user || !config.smtp_pass) {
-      throw new Error('SMTP host, user, and password are required');
+function sanitizeDisplayName(name) {
+  return String(name || "Wi'Tech Agency").replace(/["\\\r\n]/g, '');
+}
+
+export function buildEmailPayload({ user, prospect, subject, body }) {
+  const cfg = getPlatformConfig();
+  const payload = {
+    FromEmailAddress: `"${sanitizeDisplayName(user.name)}" <${buildFromAddress(user.send_subdomain)}>`,
+    ReplyToAddresses: [user.email],
+    Destination: { ToAddresses: [prospect.email] },
+    Content: {
+      Simple: {
+        Subject: { Data: subject, Charset: 'UTF-8' },
+        Body: { Text: { Data: body, Charset: 'UTF-8' } }
+      }
     }
-    const transporter = createTransport(config);
-    await transporter.verify();
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
+  };
+  if (cfg.aws.sesConfigurationSet) {
+    payload.ConfigurationSetName = cfg.aws.sesConfigurationSet;
+  }
+  return payload;
+}
+
+/**
+ * Throws with a customer-readable French message when this campaign must not
+ * send. Pure: takes the joined campaign+user row, touches nothing else.
+ */
+export function assertChannelSendable(campaign, channel) {
+  if (campaign.sending_paused_at) {
+    throw new Error(
+      "Envoi suspendu pour ce compte suite à un taux de plainte trop élevé. Contactez le support."
+    );
+  }
+  if (channel === 'email') {
+    if (!campaign.send_subdomain || campaign.send_subdomain_status !== 'verified') {
+      throw new Error(
+        "Votre domaine d'envoi n'est pas encore vérifié. Réessayez dans quelques minutes."
+      );
+    }
+    return;
+  }
+  if (channel !== 'sms') {
+    throw new Error(`Canal non supporté : ${channel}.`);
   }
 }
 
@@ -45,7 +69,7 @@ export async function testSmtpConnection(config) {
 export function compileTemplate(text, data) {
   if (!text) return '';
   let compiled = text;
-  
+
   const replacements = {
     company_name: data.company_name || 'votre entreprise',
     website: data.website || 'votre site internet',
@@ -68,21 +92,24 @@ export function compileTemplate(text, data) {
 const activeCampaignRuns = new Set();
 
 /**
- * Processes a campaign (Email, SMS, or WhatsApp) in the background sequentially with delay
+ * Processes a campaign (Email or SMS) in the background sequentially with delay
  */
 export async function runCampaignBackground(campaignId) {
   if (activeCampaignRuns.has(campaignId)) return;
   activeCampaignRuns.add(campaignId);
 
   const db = await getDb();
-  
+
   try {
     // 1. Fetch Campaign, its Template, and its Owner
     const campaign = await db.get(
-      `SELECT c.*, t.subject, t.body, u.name as user_name, u.email as user_email, u.phone as user_phone 
-       FROM campaigns c 
-       JOIN templates t ON c.template_id = t.id 
-       LEFT JOIN users u ON c.user_id = u.id 
+      `SELECT c.*, t.subject, t.body,
+              u.name AS user_name, u.email AS user_email, u.phone AS user_phone,
+              u.sender_signature AS user_signature,
+              u.send_subdomain, u.send_subdomain_status, u.sending_paused_at
+       FROM campaigns c
+       JOIN templates t ON c.template_id = t.id
+       LEFT JOIN users u ON c.user_id = u.id
        WHERE c.id = ?`,
       campaignId
     );
@@ -94,35 +121,13 @@ export async function runCampaignBackground(campaignId) {
     const channel = campaign.channel || 'email';
     console.log(`CampaignService: Starting campaign run for ID ${campaignId} on channel [${channel}]...`);
 
-    // 2. Fetch Settings
-    const settingsList = await db.all('SELECT key, value FROM settings');
-    const settings = settingsList.reduce((acc, curr) => {
-      acc[curr.key] = curr.value;
-      return acc;
-    }, {});
-
-    // Validate channel configurations
-    if (channel === 'email') {
-      if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
-        throw new Error('SMTP is not configured in settings. Cannot run email campaign.');
-      }
-    } else {
-      if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
-        throw new Error('Twilio Account SID or Auth Token is missing in settings. Cannot run message campaign.');
-      }
-      if (channel === 'sms' && !settings.twilio_phone_number) {
-        throw new Error('Twilio SMS Sender Phone Number is missing in settings.');
-      }
-      if (channel === 'whatsapp' && !settings.twilio_whatsapp_number) {
-        throw new Error('Twilio WhatsApp Sender Phone Number is missing in settings.');
-      }
-    }
+    assertChannelSendable(campaign, channel);
 
     // 3. Fetch prospects queued for this campaign
     const prospects = await db.all(`
-      SELECT l.*, cl.id as log_id 
-      FROM campaign_logs cl 
-      JOIN leads l ON cl.lead_id = l.id 
+      SELECT l.*, cl.id as log_id
+      FROM campaign_logs cl
+      JOIN leads l ON cl.lead_id = l.id
       WHERE cl.campaign_id = ? AND cl.status = 'Pending'
     `, campaignId);
 
@@ -140,17 +145,10 @@ export async function runCampaignBackground(campaignId) {
     );
 
     // Initialize clients
-    let transporter = null;
-    let twilioClient = null;
-
-    if (channel === 'email') {
-      transporter = createTransport(settings);
-    } else {
-      twilioClient = twilio(settings.twilio_account_sid, settings.twilio_auth_token);
-    }
-
-    const fromAddress = settings.smtp_from || settings.smtp_user;
-    const fromName = settings.smtp_name || "Wi'Tech Agency";
+    const cfg = getPlatformConfig();
+    const twilioClient = channel === 'sms'
+      ? twilio(cfg.twilio.accountSid, cfg.twilio.authToken)
+      : null;
 
     let sentCount = 0;
     let failedCount = 0;
@@ -173,7 +171,7 @@ export async function runCampaignBackground(campaignId) {
         continue;
       }
 
-      if ((channel === 'sms' || channel === 'whatsapp') && !prospect.phone) {
+      if (channel === 'sms' && !prospect.phone) {
         await db.run(
           "UPDATE campaign_logs SET status = 'Failed', error_message = 'No phone number available' WHERE id = ?",
           prospect.log_id
@@ -189,38 +187,30 @@ export async function runCampaignBackground(campaignId) {
           website: prospect.website,
           phone: prospect.phone,
           city: prospect.city,
-          sender_name: campaign.user_name || settings.smtp_name || "Wi'Tech Agency",
+          sender_name: campaign.user_name || "Wi'Tech Agency",
           sender_phone: campaign.user_phone || '',
-          sender_signature: settings.sender_signature
+          sender_signature: campaign.user_signature || ''
         };
 
         const subject = compileTemplate(campaign.subject, templateData);
         const body = compileTemplate(campaign.body, templateData);
 
         if (channel === 'email') {
-          // Send Email
-          await transporter.sendMail({
-            from: `"${fromName}" <${fromAddress}>`,
-            to: prospect.email,
-            subject: subject,
-            text: body
-          });
-        } else if (channel === 'sms') {
-          // Send SMS
+          await getSesClient().send(new SendEmailCommand(buildEmailPayload({
+            user: {
+              name: campaign.user_name,
+              email: campaign.user_email,
+              send_subdomain: campaign.send_subdomain
+            },
+            prospect,
+            subject,
+            body
+          })));
+        } else {
           await twilioClient.messages.create({
-            body: body,
-            from: settings.twilio_phone_number,
+            body,
+            from: cfg.twilio.senderId,
             to: prospect.phone
-          });
-        } else if (channel === 'whatsapp') {
-          // Send WhatsApp (prepend whatsapp: prefix as required by Twilio)
-          const cleanPhone = prospect.phone.replace(/\s+/g, '');
-          const formattedTo = cleanPhone.startsWith('+') ? cleanPhone : `+33${cleanPhone.slice(1)}`;
-          
-          await twilioClient.messages.create({
-            body: body,
-            from: `whatsapp:${settings.twilio_whatsapp_number.trim()}`,
-            to: `whatsapp:${formattedTo}`
           });
         }
 
@@ -233,7 +223,7 @@ export async function runCampaignBackground(campaignId) {
         // Update Lead Status
         await db.run("UPDATE leads SET status = 'Contacted' WHERE id = ?", prospect.lead_id);
         sentCount++;
-        
+
       } catch (err) {
         console.error(`CampaignService: Error sending to lead ${prospect.name}:`, err.message);
         await db.run(
