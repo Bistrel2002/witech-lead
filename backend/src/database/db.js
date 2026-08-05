@@ -199,19 +199,9 @@ async function initPostgresDb(db) {
 
   // Insert default settings
   const defaultSettings = [
-    { key: 'smtp_host', value: '' },
-    { key: 'smtp_port', value: '587' },
-    { key: 'smtp_user', value: '' },
-    { key: 'smtp_pass', value: '' },
-    { key: 'smtp_from', value: '' },
-    { key: 'smtp_name', value: "Wi'Tech Agency" },
     { key: 'company_name', value: "Wi'Tech Agency" },
     { key: 'company_website', value: 'https://www.witechagency.com' },
-    { key: 'sender_signature', value: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com" },
-    { key: 'twilio_account_sid', value: '' },
-    { key: 'twilio_auth_token', value: '' },
-    { key: 'twilio_phone_number', value: '' },
-    { key: 'twilio_whatsapp_number', value: '' }
+    { key: 'sender_signature', value: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com" }
   ];
 
   for (const setting of defaultSettings) {
@@ -220,6 +210,18 @@ async function initPostgresDb(db) {
       await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', setting.key, setting.value);
     }
   }
+
+  // One-time cleanup: sending credentials used to live here and were readable
+  // by every authenticated tenant. They are now platform-owned.
+  // Keys are enumerated rather than matched with LIKE: in PostgreSQL the `_`
+  // in 'smtp_%' is a single-character wildcard, so a pattern match here would
+  // be both wider than intended and easy to misread.
+  await db.run(
+    `DELETE FROM settings WHERE key IN (
+       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'smtp_name',
+       'twilio_account_sid', 'twilio_auth_token', 'twilio_phone_number', 'twilio_whatsapp_number'
+     )`
+  );
 
   // Seed default templates
   const templatesCount = await db.get('SELECT COUNT(*) as count FROM templates');

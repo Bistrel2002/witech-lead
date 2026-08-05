@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
-import { testSmtpConnection, runCampaignBackground } from './services/emailService.js';
+import { runCampaignBackground } from './services/emailService.js';
 
 const router = express.Router();
 
@@ -1091,13 +1091,39 @@ router.post('/campaigns/:id/restart', async (req, res) => {
 // SETTINGS ENDPOINTS
 // ==========================================
 
+/**
+ * Keys a client is permitted to write to the global settings table.
+ * Sending credentials (smtp_*, twilio_*) are deliberately absent: they are
+ * platform-owned and live in environment/Vault, never in this table.
+ */
+export const ALLOWED_SETTING_KEYS = new Set([
+  'company_name',
+  'company_website',
+  'sender_signature'
+]);
+
+export function filterSettingsPayload(payload) {
+  const accepted = {};
+  const rejected = [];
+  for (const [key, value] of Object.entries(payload || {})) {
+    if (ALLOWED_SETTING_KEYS.has(key)) {
+      accepted[key] = String(value);
+    } else {
+      rejected.push(key);
+    }
+  }
+  return { accepted, rejected };
+}
+
 // Get all settings
 router.get('/settings', async (req, res) => {
   try {
     const db = await getDb();
     const settings = await db.all('SELECT * FROM settings');
     const settingsMap = settings.reduce((acc, curr) => {
-      acc[curr.key] = curr.value;
+      if (ALLOWED_SETTING_KEYS.has(curr.key)) {
+        acc[curr.key] = curr.value;
+      }
       return acc;
     }, {});
     res.json(settingsMap);
@@ -1108,29 +1134,23 @@ router.get('/settings', async (req, res) => {
 
 // Update settings
 router.post('/settings', async (req, res) => {
-  const settingsData = req.body;
+  const { accepted, rejected } = filterSettingsPayload(req.body);
+  if (rejected.length > 0) {
+    return res.status(400).json({
+      error: `Paramètres non modifiables refusés : ${rejected.join(', ')}.`
+    });
+  }
   try {
     const db = await getDb();
-    for (const [key, value] of Object.entries(settingsData)) {
+    for (const [key, value] of Object.entries(accepted)) {
       await db.run(
         'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-        key, String(value)
+        key, value
       );
     }
     res.json({ message: 'Settings updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-// Test SMTP connection credentials
-router.post('/settings/test-smtp', async (req, res) => {
-  const config = req.body;
-  try {
-    const result = await testSmtpConnection(config);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
   }
 });
 
