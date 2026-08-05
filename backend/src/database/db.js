@@ -105,6 +105,15 @@ async function initPostgresDb(db) {
     )
   `);
 
+  // Per-tenant branding. These were global settings rows until 2026-08;
+  // sharing them across tenants leaked one customer's signature into another's
+  // outbound campaigns.
+  await db.exec(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_website TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS sender_signature TEXT;
+  `);
+
   // Create leads table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
@@ -222,6 +231,30 @@ async function initPostgresDb(db) {
        'twilio_account_sid', 'twilio_auth_token', 'twilio_phone_number', 'twilio_whatsapp_number'
      )`
   );
+
+  // Backfill: give every existing user the previously-global branding values,
+  // then retire those rows.
+  const legacyBranding = await db.all(
+    "SELECT key, value FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+  );
+  if (legacyBranding.length > 0) {
+    const legacy = legacyBranding.reduce((acc, row) => {
+      acc[row.key] = row.value;
+      return acc;
+    }, {});
+    await db.run(
+      `UPDATE users
+         SET company_name     = COALESCE(company_name, ?),
+             company_website  = COALESCE(company_website, ?),
+             sender_signature = COALESCE(sender_signature, ?)
+       WHERE company_name IS NULL
+          OR company_website IS NULL
+          OR sender_signature IS NULL`,
+      legacy.company_name || null,
+      legacy.company_website || null,
+      legacy.sender_signature || null
+    );
+  }
 
   // Seed default templates
   const templatesCount = await db.get('SELECT COUNT(*) as count FROM templates');

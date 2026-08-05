@@ -1093,14 +1093,14 @@ router.post('/campaigns/:id/restart', async (req, res) => {
 
 /**
  * Keys a client is permitted to write to the global settings table.
- * Sending credentials (smtp_*, twilio_*) are deliberately absent: they are
- * platform-owned and live in environment/Vault, never in this table.
+ * Empty as of 2026-08: sending credentials (smtp_*, twilio_*) are
+ * platform-owned and live in environment/Vault, and branding
+ * (company_name, company_website, sender_signature) moved to per-user
+ * columns on `users` (see PROFILE_EDITABLE_FIELDS in authRoutes.js) so one
+ * tenant editing it can no longer overwrite every other tenant's copy.
+ * Nothing may be written to this table by a customer any more.
  */
-export const ALLOWED_SETTING_KEYS = new Set([
-  'company_name',
-  'company_website',
-  'sender_signature'
-]);
+export const ALLOWED_SETTING_KEYS = new Set([]);
 
 export function filterSettingsPayload(payload) {
   const accepted = {};

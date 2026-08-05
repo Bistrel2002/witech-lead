@@ -8,20 +8,13 @@ test('credential keys are not allowed', () => {
   }
 });
 
-test('filterSettingsPayload drops unknown and credential keys', () => {
+test('filterSettingsPayload now rejects everything, branding included', () => {
   const { accepted, rejected } = filterSettingsPayload({
     company_name: 'Acme',
-    smtp_pass: 'hunter2',
-    twilio_auth_token: 'secret',
-    not_a_real_key: 'x'
+    smtp_pass: 'hunter2'
   });
-  assert.deepEqual(Object.keys(accepted), ['company_name']);
-  assert.deepEqual(rejected.sort(), ['not_a_real_key', 'smtp_pass', 'twilio_auth_token']);
-});
-
-test('filterSettingsPayload coerces values to strings', () => {
-  const { accepted } = filterSettingsPayload({ company_name: 42 });
-  assert.strictEqual(accepted.company_name, '42');
+  assert.deepEqual(accepted, {});
+  assert.deepEqual(rejected.sort(), ['company_name', 'smtp_pass']);
 });
 
 test('filterSettingsPayload on an empty payload yields nothing', () => {
