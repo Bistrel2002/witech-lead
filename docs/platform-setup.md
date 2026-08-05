@@ -138,10 +138,25 @@ Créer l'utilisateur et attacher une politique inline équivalente à :
 }
 ```
 
-Remplacer `<ROUTE53_HOSTED_ZONE_ID>` par l'ID récupéré à l'étape 1. SES v2 ne
-supporte pas de restriction par ARN d'identité sur `CreateEmailIdentity` /
-`GetEmailIdentity` / `SendEmail`, d'où `Resource: "*"` pour ce bloc — ne pas
-élargir les actions au-delà de cette liste.
+Remplacer `<ROUTE53_HOSTED_ZONE_ID>` par l'ID récupéré à l'étape 1.
+
+> **Point non vérifié — à contrôler avant de créer la politique en
+> production.** La politique ci-dessus accorde les quatre actions SES sur
+> `Resource: "*"`. Il est possible que SES supporte en réalité une
+> restriction par ARN d'identité de la forme
+> `arn:aws:ses:<region>:<account-id>:identity/*.mail.witechagency.com`
+> pour tout ou partie de `ses:CreateEmailIdentity` /
+> `ses:GetEmailIdentity` / `ses:PutEmailIdentityMailFromAttributes` /
+> `ses:SendEmail`, ce qui correspondrait naturellement au schéma
+> `{userId}.mail.witechagency.com` de ce backend et serait plus restrictif
+> que `"*"`. Cette affirmation n'a pas été vérifiée contre la référence AWS
+> IAM Service Authorization Reference à jour pour SES au moment de la
+> rédaction de ce document — **consultez cette référence au moment de créer
+> la politique**, et scopez ces actions à ce pattern d'ARN si le service le
+> permet. Ne considérez pas `Resource: "*"` comme la solution la plus
+> restrictive possible tant que ce point n'a pas été tranché. Ne pas élargir
+> les actions elles-mêmes au-delà de la liste ci-dessus, quelle que soit la
+> restriction de ressource retenue.
 
 Générer une clé d'accès pour cet utilisateur et renseigner :
 
@@ -293,15 +308,30 @@ Une fois les étapes 1 à 5 effectuées :
    SELECT id, send_subdomain, send_subdomain_status FROM users ORDER BY id DESC LIMIT 1;
    ```
 
-3. **Vérifier dans Route53** que les enregistrements DKIM existent pour ce
-   sous-domaine — 3 CNAME de la forme
-   `<token>._domainkey.<send_subdomain>` → `<token>.dkim.amazonses.com`,
-   plus le MX et le TXT SPF du MAIL FROM (`bounce.<send_subdomain>`) :
+3. **Vérifier dans Route53** que les enregistrements suivants existent pour
+   ce sous-domaine — les valeurs exactes ci-dessous viennent de
+   `dkimRecordsFor` et `mailFromRecordsFor` dans
+   `backend/src/services/sendingDomainService.js`, pas d'une supposition :
+
+   | Type | Nom | Valeur |
+   |---|---|---|
+   | `CNAME` (× 3, un par token DKIM) | `<token>._domainkey.<send_subdomain>` | `<token>.dkim.amazonses.com` |
+   | `MX` | `bounce.<send_subdomain>` | `10 feedback-smtp.<AWS_REGION>.amazonses.com` |
+   | `TXT` | `bounce.<send_subdomain>` | `"v=spf1 include:amazonses.com ~all"` (guillemets inclus littéralement — Route53 les exige dans la valeur d'un enregistrement TXT) |
+
+   Les 3 `<token>` DKIM sont ceux renvoyés par SES à la création de
+   l'identité (`CreateEmailIdentityCommand` / `DkimAttributes.Tokens`), donc
+   propres à chaque tenant — ils ne sont pas prévisibles à l'avance,
+   contrairement au nom du MAIL FROM (`bounce.<send_subdomain>`) et à sa
+   valeur SPF qui sont fixes.
 
    ```bash
    aws route53 list-resource-record-sets --hosted-zone-id <ROUTE53_HOSTED_ZONE_ID> \
      --query "ResourceRecordSets[?contains(Name, '<send_subdomain>')]"
    ```
+
+   La sortie doit contenir 3 `CNAME` (DKIM) + 1 `MX` + 1 `TXT` (MAIL FROM)
+   pour ce tenant, soit 5 enregistrements au total.
 
 4. **Confirmer que le statut bascule** : appeler
    `GET /api/sending-status` (authentifié comme ce compte) et vérifier que
@@ -315,3 +345,45 @@ Une fois les étapes 1 à 5 effectuées :
    réponse dans la boîte du tenant (le `ReplyTo` de la campagne). Un
    statut `verified` seul ne prouve pas que SES est sorti de sandbox
    (étape 3) ni que Twilio a validé le Sender ID (étape 5).
+
+---
+
+## Opérations courantes — lever la pause automatique d'un tenant
+
+Ce n'est pas une étape de configuration initiale, mais un opérateur en aura
+besoin dès qu'un tenant est mis en pause. Documenté ici pour qu'il n'ait pas
+à relire le code sous pression.
+
+**Déclenchement.** Le webhook `POST /api/ses/events`
+(`backend/src/routes/sesWebhookRoutes.js`, fonction
+`pauseIfComplaintRateExceeded`) met un tenant en pause automatiquement dès
+que, sur un échantillon d'**au moins 20 événements** enregistrés
+(`COMPLAINT_SAMPLE_FLOOR = 20`), le taux de plaintes (`Complaint` /
+total) dépasse **5 %** (`COMPLAINT_RATE_THRESHOLD = 0.05`). À ce moment :
+
+- `users.sending_paused_at` est renseigné (`CURRENT_TIMESTAMP`) ;
+- toutes ses campagnes `Active` passent à `Paused`
+  (`UPDATE campaigns SET status = 'Paused' WHERE user_id = ? AND status = 'Active'`).
+
+**Effet.** Tant que `sending_paused_at` n'est pas `NULL`,
+`assertChannelSendable` (`backend/src/services/emailService.js`) bloque tout
+envoi — e-mail **et** SMS — pour ce tenant, avec le message :
+« Envoi suspendu pour ce compte suite à un taux de plainte trop élevé.
+Contactez le support. » Relancer une campagne depuis l'interface
+(`POST /campaigns/:id/start` ou `/restart`) ne contourne pas ce blocage :
+`runCampaignBackground` revérifie `sending_paused_at` à chaque exécution et
+fait échouer la campagne (statut `Failed`) si la pause est toujours active.
+
+**Il n'existe aujourd'hui aucune UI ni endpoint pour lever cette pause** —
+c'est une opération manuelle en base de données, à faire seulement après
+avoir investigué la cause des plaintes (contenu de campagne, ciblage,
+réputation du sous-domaine) :
+
+```sql
+UPDATE users SET sending_paused_at = NULL WHERE id = <user_id>;
+```
+
+Après cette mise à jour, le tenant (ou l'opérateur pour son compte) doit
+relancer manuellement ses campagnes restées en `Paused` depuis
+l'interface — la levée de `sending_paused_at` ne les remet pas `Active`
+automatiquement.
