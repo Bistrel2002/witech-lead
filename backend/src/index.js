@@ -6,6 +6,7 @@ import apiRouter from './routes.js';
 import authRouter from './routes/authRoutes.js';
 import portalRouter from './routes/portalRoutes.js';
 import sesWebhookRouter from './routes/sesWebhookRoutes.js';
+import unsubscribeRouter from './routes/unsubscribeRoutes.js';
 import { getDb } from './database/db.js';
 import { getPlatformConfig } from './config/platformConfig.js';
 import { authenticateUser } from './middlewares/authMiddleware.js';
@@ -52,6 +53,11 @@ app.use('/api/portal', portalRouter);
 
 // AWS SNS delivers SES events unauthenticated and as text/plain.
 app.use('/api/ses', express.text({ type: '*/*' }), sesWebhookRouter);
+
+// Recipients have no session. Mounted before authenticateUser deliberately,
+// and NOT under /api so the URL stays short enough to survive line-wrapping
+// in plain-text email clients.
+app.use('/unsubscribe', express.urlencoded({ extended: false }), unsubscribeRouter);
 
 // API Routes (General CRM operations - Protected by User Login)
 app.use('/api', authenticateUser, apiRouter);
