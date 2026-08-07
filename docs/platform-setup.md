@@ -10,7 +10,7 @@ Tant que les étapes 1 à 5 ci-dessous n'ont pas été exécutées avec de vrais
 identifiants AWS et Twilio, l'état honnête du système est : les tests
 unitaires passent, le provisioning est tenté à l'inscription et se retrouve
 en `pending` ou `failed`, et **aucun e-mail ne part réellement**. En
-production le serveur **refuse désormais de démarrer** si l'une des six
+production le serveur **refuse désormais de démarrer** si l'une des huit
 variables de `REQUIRED_VARS` manque (`bootstrap()` appelle
 `getPlatformConfig()`, voir plus bas) ; hors production il démarre en
 affichant un avertissement. Ne considérez la fonctionnalité comme opérationnelle
@@ -41,6 +41,8 @@ ni Twilio réels.
 | `TWILIO_AUTH_TOKEN` | Token d'authentification Twilio partagé. |
 | `TWILIO_SENDER_ID` | Sender ID alphanumérique partagé (`WITECH`). |
 | `SES_WEBHOOK_TOKEN` | Secret partagé exigé en `?token=...` sur le webhook SNS. **Absent de la spec initiale (task-9-brief.md) — ajouté ici car `getPlatformConfig()` le rend obligatoire et `handleSesEvent` rejette toute requête sans lui (403).** |
+| `UNSUBSCRIBE_SECRET` | Secret HMAC qui signe les tokens de désinscription (`unsubscribeService.js`, fonction `sign`). Il n'y a pas de table de tokens : un lien reste valide indéfiniment tant que ce secret ne change pas. **Faire tourner ce secret invalide instantanément tous les liens de désinscription déjà envoyés** (`verifyUnsubscribeToken` échoue sur toute signature calculée avec l'ancien secret) — à traiter comme une valeur permanente dès l'envoi de la première campagne. |
+| `PUBLIC_API_URL` | URL publique **du backend lui-même**, pas celle du frontend (`FRONTEND_URL` est la mauvaise valeur ici, voir le commentaire dans `platformConfig.js`). C'est elle qui préfixe chaque lien `/unsubscribe/<token>` inséré dans les e-mails de campagne (`buildUnsubscribeUrl` dans `unsubscribeService.js`) : elle doit donc être joignable en HTTPS depuis la boîte mail d'un destinataire, pas seulement résoluble en local. |
 
 > **Écart avec la spec de départ :** le brief de la tâche 9 (étape 2) ne
 > listait que `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` pour l'IAM,
@@ -199,14 +201,11 @@ doit décrire explicitement :
 - **Le cas d'usage** : prospection B2B à froid (« cold outreach ») envoyée
   au nom de chaque client de la plateforme, un sous-domaine dédié par
   tenant (`{tenant}.mail.witechagency.com`) pour isoler la réputation.
-- **La gestion de l'opt-out** : chaque campagne inclut la possibilité de se
-  désinscrire / de répondre pour ne plus être contacté (le `ReplyTo` pointe
-  vers l'adresse du tenant, cf. `buildEmailPayload` dans `emailService.js`).
-- **La gestion des bounces et plaintes** : décrire le mécanisme déjà en
-  place — configuration set SES → SNS → webhook `/api/ses/events` → un
-  tenant dont le taux de plainte dépasse 5 % (sur un échantillon d'au
-  moins 20 envois) est automatiquement mis en pause (voir
-  `pauseIfComplaintRateExceeded` dans `sesWebhookRoutes.js`).
+- **La gestion de l'opt-out** : voir « Réponses prêtes à coller » ci-dessous.
+- **La gestion des bounces et plaintes** : voir « Réponses prêtes à coller »
+  ci-dessous.
+- **Comment la liste de prospects est constituée** : voir « Réponses prêtes
+  à coller » ci-dessous.
 
 Ce traitement prend **typiquement 24 à 48h**. Ne planifiez aucune campagne
 réelle avant confirmation écrite d'AWS. Tant que le compte est en sandbox,
@@ -214,6 +213,110 @@ réelle avant confirmation écrite d'AWS. Tant que le compte est en sandbox,
 bien vérifié) sans que l'envoi à un prospect non-vérifié fonctionne pour
 autant — la sortie de sandbox est une condition **distincte** de la
 vérification de domaine.
+
+### Réponses prêtes à coller pour le formulaire « Request production access »
+
+Les trois paragraphes ci-dessous ont été rédigés en relisant directement le
+code listé en regard de chacun, pas recopiés depuis une spec. Collez-les
+tels quels dans les champs correspondants du formulaire SES ; les seules
+adaptations attendues sont stylistiques.
+
+**Comment un destinataire se désinscrit.**
+
+> Chaque e-mail de campagne porte un en-tête `List-Unsubscribe` (URL de
+> désinscription entre chevrons) et un en-tête
+> `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, conformément à la
+> désinscription en un clic (RFC 8058) exigée par Gmail et Outlook pour les
+> expéditeurs en volume. Le corps texte de l'e-mail contient également un
+> lien de désinscription visible. Ce lien est ajouté automatiquement par la
+> plateforme si le message composé par le client ne le contient pas déjà :
+> aucun e-mail de campagne ne peut donc partir sans moyen de se
+> désinscrire. Une désinscription en un clic déclenchée par le client de
+> messagerie enregistre l'adresse immédiatement ; un clic sur le lien
+> visible dans le corps du message ouvre une page de confirmation, et
+> l'adresse est enregistrée dès validation de cette page. Dans les deux
+> cas, l'adresse est ajoutée à une liste de suppression vérifiée avant
+> l'envoi de chaque message : une adresse qui s'est désinscrite d'un
+> expéditeur donné ne reçoit plus jamais rien de cet expéditeur, et sans
+> limite de durée.
+
+Sourcé sur : `buildEmailPayload` et `appendUnsubscribeNotice` dans
+`backend/src/services/emailService.js` (en-têtes et texte exacts), l'appel à
+`isSuppressed` dans `runCampaignBackground` (même fichier, juste avant
+l'envoi) et `unsubscribeService.js` (`recordUnsubscribe`,
+`isSuppressed`). Détail utile pour vous, pas nécessairement pour le
+formulaire : une désinscription manuelle (page publique, source `manual`)
+ne bloque que le tenant depuis lequel le lien a été envoyé ; une
+désinscription issue d'une plainte (source `complaint`, voir ci-dessous)
+bloque tous les tenants de la plateforme pour cette adresse — voir
+`isSuppressed` dans `unsubscribeService.js`, qui matche
+`user_id = ? OR user_id IS NULL`. Il n'existe dans le code aucun mécanisme
+pour réinscrire une adresse : une fois désinscrite, elle ne peut être
+retirée de la liste de suppression que par une intervention manuelle en
+base (voir la section « Opérations courantes — consulter les
+suppressions » plus bas).
+
+**Comment les bounces et les plaintes sont traités.**
+
+> Le configuration set SES de la plateforme est relié à un topic SNS,
+> lui-même abonné à un webhook authentifié de l'application
+> (`POST /api/ses/events`, protégé par un jeton partagé). Chaque événement
+> `Bounce` et `Complaint` reçu est enregistré et attribué au tenant
+> concerné. Toute adresse à l'origine d'une plainte (`Complaint`) est
+> immédiatement ajoutée à la liste de suppression pour l'ensemble de la
+> plateforme, pas seulement pour le tenant visé par la plainte. Si un
+> tenant accumule au moins 20 événements de livraison (bounces et plaintes
+> confondus) sur les 30 derniers jours et que la part de plaintes parmi
+> ces événements atteint 5 %, l'envoi de ce tenant est automatiquement
+> suspendu (e-mail et SMS) jusqu'à intervention d'un opérateur.
+
+Sourcé sur : `backend/src/routes/sesWebhookRoutes.js` — constantes
+`COMPLAINT_RATE_THRESHOLD = 0.05`, `COMPLAINT_SAMPLE_FLOOR = 20` et
+`COMPLAINT_WINDOW_DAYS = 30` en tête de fichier, fonction
+`pauseIfComplaintRateExceeded` pour la logique de pause, et l'appel à
+`recordUnsubscribe(db, null, event.recipient, 'complaint')` (user_id `null`
+= suppression globale) pour la désinscription automatique sur plainte. Le
+webhook est monté en `app.use('/api/ses', ..., sesWebhookRouter)` dans
+`backend/src/index.js` avec la route `router.post('/events', ...)`. Ce
+mécanisme de pause existait déjà avant la fonctionnalité de désinscription
+(voir Étape 4) ; ce qui est nouveau ici est que la plainte suppresse
+désormais aussi l'adresse. Nuance à connaître avant d'interpréter le
+chiffre de 5 % vous-même : le dénominateur ne compte que les bounces et
+les plaintes, pas le volume total envoyé — le détail complet est dans la
+section « Opérations courantes — lever la pause automatique d'un tenant »
+plus bas.
+
+**Comment la liste de prospects est constituée.**
+
+> Les coordonnées de prospects proviennent de fiches d'entreprises
+> publiques référencées sur Google Maps (nom, catégorie, ville, téléphone,
+> site web) et, lorsqu'un site web est renseigné, d'une adresse e-mail
+> publiée sur ce site (liens `mailto:` ou texte de la page d'accueil). Ce
+> sont des coordonnées professionnelles publiques utilisées dans un cadre
+> de prospection B2B, pas des adresses de particuliers.
+
+Sourcé sur : `backend/src/services/scraper.py`, fonctions
+`scrape_google_maps` (collecte des fiches Google Maps) et `audit_website`
+(extraction de l'e-mail publié sur le site de l'entreprise). Ce paragraphe
+ne couvre que ce chemin-là.
+
+> **Point à trancher avant de soumettre le formulaire — ne pas coller le
+> paragraphe ci-dessus sans le lire.** Le code expose aussi
+> `POST /api/leads/french-db-import` (`backend/src/routes.js`), qui insère
+> en base tout CSV envoyé par un tenant authentifié (colonnes `name`,
+> `category`, `city`, `phone`, `email`, `website`, `address`, `rating`,
+> `review_count`) dans la table `french_businesses` partagée entre tous les
+> tenants. Rien dans le code ne réserve cette route à un rôle
+> administrateur, et rien n'y vérifie la provenance des lignes importées :
+> la garantie « aucune liste achetée » n'est donc **pas** imposée par le
+> système pour ce chemin, c'est un engagement opérationnel de l'opérateur.
+> Avant de répondre à AWS, décidez comment vous encadrez cette route —
+> par exemple en la réservant à un rôle admin, en ajoutant un champ de
+> provenance vérifié à l'import, ou en l'acceptant telle quelle comme
+> contrôle purement documentaire — et assurez-vous que ce que vous
+> déclarez à AWS correspond à ce qui est réellement vrai au moment où vous
+> soumettez le formulaire. Ce document ne tranche pas ce choix à votre
+> place.
 
 ---
 
@@ -483,3 +586,59 @@ les constantes `COMPLAINT_RATE_THRESHOLD`, `COMPLAINT_SAMPLE_FLOOR` et
 `COMPLAINT_WINDOW_DAYS` en tête de
 `backend/src/routes/sesWebhookRoutes.js` — les modifier en base est
 impossible, c'est un déploiement.
+
+---
+
+## Opérations courantes — consulter les suppressions (désinscriptions)
+
+**Il n'existe aujourd'hui aucune interface pour consulter ou gérer la liste
+de suppression.** Un opérateur qui veut savoir si une adresse est
+désinscrite, ou lister les désinscriptions d'un tenant, travaille en SQL
+directement sur la table `unsubscribes` (schéma dans
+`backend/src/database/db.js`).
+
+Rappel du modèle, tel qu'implémenté dans `isSuppressed`
+(`backend/src/services/unsubscribeService.js`) : une ligne avec `user_id`
+renseigné ne suppresse qu'un tenant précis (désinscription manuelle depuis
+la page publique, colonne `source = 'manual'`) ; une ligne avec
+`user_id IS NULL` suppresse l'adresse pour **toute** la plateforme
+(déclenchée automatiquement par une plainte SES, colonne
+`source = 'complaint'`, voir la section précédente). Ce sont les deux
+seules valeurs de `source` produites par le code aujourd'hui.
+
+**Désinscriptions d'un tenant donné** (uniquement les lignes propres à ce
+tenant — n'inclut pas les suppressions globales qui le concernent aussi) :
+
+```sql
+SELECT id, email, source, created_at
+  FROM unsubscribes
+ WHERE user_id = <user_id>
+ ORDER BY created_at DESC;
+```
+
+**Suppressions globales** (plaintes, applicables à tous les tenants) :
+
+```sql
+SELECT id, email, source, created_at
+  FROM unsubscribes
+ WHERE user_id IS NULL
+ ORDER BY created_at DESC;
+```
+
+**Statut d'une adresse précise pour un tenant donné** — reproduit
+exactement la condition de `isSuppressed` (`email = ? AND (user_id = ? OR
+user_id IS NULL)`), donc un résultat non vide ici signifie que
+`runCampaignBackground` sauterait cette adresse pour ce tenant :
+
+```sql
+SELECT id, user_id, source, created_at
+  FROM unsubscribes
+ WHERE email = '<email>'
+   AND (user_id = <user_id> OR user_id IS NULL);
+```
+
+Il n'existe pas non plus de mécanisme, dans le code, pour réinscrire une
+adresse : la seule façon de retirer une suppression est de supprimer la
+ligne correspondante en base, à faire seulement à la demande explicite du
+destinataire (une adresse désinscrite par plainte ne devrait, en pratique,
+jamais être retirée manuellement).
