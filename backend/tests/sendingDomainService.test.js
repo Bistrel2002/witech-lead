@@ -17,7 +17,9 @@ const ENV = {
   TWILIO_ACCOUNT_SID: 'ACtest',
   TWILIO_AUTH_TOKEN: 'tok',
   TWILIO_SENDER_ID: 'WITECH',
-  SES_WEBHOOK_TOKEN: 'test-webhook-token'
+  SES_WEBHOOK_TOKEN: 'test-webhook-token',
+  UNSUBSCRIBE_SECRET: 'unsub-secret-test',
+  PUBLIC_API_URL: 'https://api.example.com'
 };
 
 test.beforeEach(() => {

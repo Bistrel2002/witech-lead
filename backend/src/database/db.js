@@ -306,6 +306,29 @@ async function initPostgresDb(db) {
       ON sending_events(message_id) WHERE message_id IS NOT NULL;
   `);
 
+  // Opt-out suppressions. user_id NULL means global — set when a recipient
+  // files a spam complaint, since an address that complains endangers the
+  // reputation of the whole shared sending infrastructure.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS unsubscribes (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      email VARCHAR(255) NOT NULL,
+      source VARCHAR(20) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  // Two partial indexes rather than one composite: in PostgreSQL NULL is not
+  // equal to NULL, so a plain UNIQUE(user_id, email) would happily accept
+  // unlimited duplicate global rows.
+  await db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribes_tenant
+      ON unsubscribes(user_id, email) WHERE user_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribes_global
+      ON unsubscribes(email) WHERE user_id IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_unsubscribes_email ON unsubscribes(email);
+  `);
+
   // Create lead_discussions table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS lead_discussions (

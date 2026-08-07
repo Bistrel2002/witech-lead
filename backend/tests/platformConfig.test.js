@@ -8,7 +8,9 @@ const REQUIRED = {
   TWILIO_ACCOUNT_SID: 'ACtest',
   TWILIO_AUTH_TOKEN: 'tokentest',
   TWILIO_SENDER_ID: 'WITECH',
-  SES_WEBHOOK_TOKEN: 'webhook-secret-test-token'
+  SES_WEBHOOK_TOKEN: 'webhook-secret-test-token',
+  UNSUBSCRIBE_SECRET: 'unsub-secret',
+  PUBLIC_API_URL: 'https://api.example.com'
 };
 
 /**
@@ -82,5 +84,11 @@ test('the returned object is frozen', () => {
   withEnv({}, () => {
     const cfg = getPlatformConfig();
     assert.throws(() => { cfg.mail.rootDomain = 'evil.com'; }, TypeError);
+  });
+});
+
+test('publicApiUrl has any trailing slash removed', () => {
+  withEnv({ PUBLIC_API_URL: 'https://api.example.com/' }, () => {
+    assert.equal(getPlatformConfig().publicApiUrl, 'https://api.example.com');
   });
 });

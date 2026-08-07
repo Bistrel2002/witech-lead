@@ -11,7 +11,9 @@ test.beforeEach(() => {
     TWILIO_ACCOUNT_SID: 'AC',
     TWILIO_AUTH_TOKEN: 't',
     TWILIO_SENDER_ID: 'WITECH',
-    SES_WEBHOOK_TOKEN: 'test-webhook-token'
+    SES_WEBHOOK_TOKEN: 'test-webhook-token',
+    UNSUBSCRIBE_SECRET: 'unsub-secret-test',
+    PUBLIC_API_URL: 'https://api.example.com'
   });
   resetPlatformConfigCache();
 });

@@ -46,7 +46,7 @@ services:
 
       # ── Platform outreach infrastructure (operator-owned) ──────────
       # bootstrap() calls getPlatformConfig() and aborts the boot in
-      # production if any of the six required keys below is missing.
+      # production if any of the eight required keys below is missing.
       # Without them a deploy from this blueprint used to come up healthy,
       # pass its health check, and silently be unable to send a single
       # campaign or attribute a single bounce.
@@ -69,6 +69,12 @@ services:
         sync: false  # Long random string; the SNS subscription URL must carry
                      # the same value as ?token=... — it is the only thing
                      # stopping anyone from posting fake complaint events.
+      - key: PUBLIC_API_URL
+        sync: false  # Public base URL of THIS backend (not FRONTEND_URL).
+                     # Unsubscribe links are served by the backend.
+      - key: UNSUBSCRIBE_SECRET
+        sync: false  # Long random string; signs unsubscribe tokens. Rotating
+                     # it invalidates every unsubscribe link already sent.
 
       # Required in practice — provisioning and bounce attribution need these.
       - key: AWS_ACCESS_KEY_ID

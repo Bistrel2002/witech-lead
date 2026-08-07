@@ -12,7 +12,9 @@ const REQUIRED_VARS = [
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
   'TWILIO_SENDER_ID',
-  'SES_WEBHOOK_TOKEN'
+  'SES_WEBHOOK_TOKEN',
+  'UNSUBSCRIBE_SECRET',
+  'PUBLIC_API_URL'
 ];
 
 let cached = null;
@@ -51,6 +53,14 @@ export function getPlatformConfig() {
       // only thing standing between an unauthenticated attacker and the
       // ability to post fake bounce/complaint events for any tenant.
       token: process.env.SES_WEBHOOK_TOKEN
+    }),
+    // Public base URL of THIS backend. Unsubscribe links are served by the
+    // backend, not the frontend, so FRONTEND_URL is the wrong value here.
+    publicApiUrl: (process.env.PUBLIC_API_URL || '').replace(/\/+$/, ''),
+    unsubscribe: Object.freeze({
+      // Signs unsubscribe tokens. Rotating it invalidates every link already
+      // sent, so treat it as permanent once the first campaign has gone out.
+      secret: process.env.UNSUBSCRIBE_SECRET
     })
   });
 
