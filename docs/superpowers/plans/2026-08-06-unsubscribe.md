@@ -867,16 +867,53 @@ git commit -m "feat(unsubscribe): add opt-out link, headers and suppression chec
 - Consumes: `recordUnsubscribe` (Task 1).
 - Produces: no new exports; the existing `POST /api/ses/events` gains one side effect.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Teach the existing fake DB about the new table**
 
-Append to `backend/tests/sesWebhookSecurity.test.js` a test asserting a complaint writes a global suppression row. Use the same fake-db and valid-token helpers the file already defines for its other route tests, and assert that among the `run` calls there is an `INSERT INTO unsubscribes` whose params include `null` for `user_id`, the complaining recipient's address, and `'complaint'`.
+⚠️ **Do this first or you will break passing tests.** `fakeDb.run` in `backend/tests/sesWebhookSecurity.test.js:69` ends with `throw new Error(\`fakeDb.run: unhandled query: ${sql}\`)`. The moment the complaint branch issues an `INSERT INTO unsubscribes`, every existing complaint test in that file throws, the handler swallows it into its `catch`, and the pause assertions fail for a reason that has nothing to do with pausing.
 
-- [ ] **Step 2: Run the test to verify it fails**
+In `fakeDb`, add an `unsubscribes` collection alongside `events`, and a branch in `run` **before** the final `throw`:
+
+```js
+      if (/INSERT INTO unsubscribes/.test(sql)) {
+        const [user_id, email, source] = params;
+        unsubscribes.push({ user_id, email, source });
+        return { lastID: unsubscribes.length, changes: 1 };
+      }
+```
+
+Extend the factory signature to `function fakeDb({ users = [], events = [], unsubscribes = [] } = {})` and expose `unsubscribes` on the returned object next to `events` and `calls`.
+
+- [ ] **Step 2: Write the failing test**
+
+Append to `backend/tests/sesWebhookSecurity.test.js`, reusing the file's existing `TOKEN`, `fakeRes`, and notification-builder helpers. Build the complaint payload the same way the file's existing complaint tests do — read them rather than inventing a new shape:
+
+```js
+test('a complaint suppresses the recipient for every tenant', async () => {
+  const db = fakeDb({ users: [{ id: 7, send_subdomain: '7.mail.witechagency.com' }] });
+  const res = fakeRes();
+
+  await handleSesEvent(
+    { query: { token: TOKEN }, body: complaintNotification({ messageId: 'm-1', recipient: 'angry@exemple.fr' }) },
+    res,
+    { expectedToken: TOKEN, getDb: async () => db }
+  );
+
+  assert.equal(res.statusCode, 200);
+  const row = db.unsubscribes.find((u) => u.email === 'angry@exemple.fr');
+  assert.ok(row, 'complaint should create an unsubscribes row');
+  assert.equal(row.user_id, null, 'suppression must be global, not scoped to the complaining tenant');
+  assert.equal(row.source, 'complaint');
+});
+```
+
+If the file has no `complaintNotification` helper, add one mirroring the existing `bounceNotification` but with `eventType: 'Complaint'` and a `complaint.complainedRecipients` array — check `extractDeliveryEvent` in `backend/src/routes/sesWebhookRoutes.js` for the exact field names it reads.
+
+- [ ] **Step 3: Run the test to verify it fails**
 
 Run: `npm test --prefix backend`
 Expected: FAIL — no `INSERT INTO unsubscribes` is issued.
 
-- [ ] **Step 3: Wire it in**
+- [ ] **Step 4: Wire it in**
 
 In `backend/src/routes/sesWebhookRoutes.js`, add the import:
 
@@ -898,12 +935,12 @@ and extend the complaint branch:
     }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npm test --prefix backend`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/src/routes/sesWebhookRoutes.js backend/tests/sesWebhookSecurity.test.js
