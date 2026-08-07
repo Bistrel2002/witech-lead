@@ -1,7 +1,9 @@
 # Configuration unique de la plateforme d'envoi (SES + Twilio)
 
 Ce document décrit tout ce qu'un opérateur humain doit faire, **une seule fois**,
-avant que Witech Lead puisse envoyer un seul e-mail ou SMS réel. Le code
+avant que Witech Lead puisse envoyer un seul e-mail réel. (Le canal SMS est
+désactivé dans le produit — voir l'étape 5 ; seules les étapes 1 à 4 et 6 sont
+nécessaires pour lancer.) Le code
 (provisioning du sous-domaine, DKIM, webhook de bounce/complaint, pause
 automatique des tenants) est déjà en place, mais il ne peut pas créer le
 compte AWS, déléguer le DNS, ni enregistrer le Sender ID Twilio à votre place.
@@ -395,6 +397,39 @@ ne couvre que ce chemin-là.
 
 ## Étape 5 — Twilio : Sender ID alphanumérique partagé
 
+> **Le canal SMS est aujourd'hui désactivé dans le produit — cette étape n'est
+> pas nécessaire pour lancer.** Un tenant ne peut ni créer ni exécuter une
+> campagne SMS : `validateChannel` (`backend/src/routes.js`, ensemble
+> `DISABLED_CHANNELS`) refuse `channel: 'sms'` à la création, et
+> `assertChannelSendable` (`backend/src/services/emailService.js`, constante
+> `SMS_UNAVAILABLE_MESSAGE`) le refuse à l'envoi ; le bouton SMS de l'assistant
+> de campagne est affiché désactivé avec la mention « Bientôt disponible ». Le
+> code d'envoi Twilio et la config Twilio restent en place : c'est un
+> interrupteur, pas une suppression.
+>
+> **Raison.** Un Sender ID alphanumérique est à sens unique (point 3
+> ci-dessous) : il ne peut pas recevoir les réponses `STOP` que la
+> réglementation française exige pour la prospection par SMS. Un SMS de
+> campagne partirait donc sans lien de désinscription, sans `STOP`, et sans
+> aucun moyen d'alimenter la table `unsubscribes` — l'inverse exact de la
+> garantie donnée à AWS pour l'e-mail.
+>
+> **Ce qui doit exister avant de réactiver SMS** (retirer `'sms'` de
+> `DISABLED_CHANNELS` ne suffit pas, et ne doit pas être fait avant) :
+> 1. un numéro Twilio **bidirectionnel** (long code ou numéro court FR) à la
+>    place — ou en complément — du Sender ID alphanumérique ;
+> 2. une route entrante de réception des SMS dans ce backend (il n'en existe
+>    aucune aujourd'hui) qui enregistre `STOP` / `ARRET` dans `unsubscribes` ;
+> 3. la vérification de suppression étendue aux **numéros de téléphone** —
+>    `isSuppressed` ne connaît aujourd'hui que les adresses e-mail ;
+> 4. la mention du mot-clé d'opt-out dans le corps des SMS de campagne
+>    (l'équivalent de `appendUnsubscribeNotice` côté e-mail) ;
+> 5. la mise à jour de la réponse « opt-out » du formulaire SES/AWS et de la
+>    spec `docs/superpowers/specs/2026-08-06-unsubscribe-design.md`, qui
+>    décrivent aujourd'hui un lancement e-mail uniquement.
+>
+> Les étapes ci-dessous restent documentées pour ce jour-là.
+
 1. Dans la console Twilio, enregistrer le Sender ID alphanumérique
    `WITECH` (valeur attendue dans `TWILIO_SENDER_ID`, cf. `.env.example`).
 2. L'enregistrement pour la zone **FR/EU est soumis à revue** par les
@@ -633,9 +668,20 @@ user_id IS NULL)`), donc un résultat non vide ici signifie que
 ```sql
 SELECT id, user_id, source, created_at
   FROM unsubscribes
- WHERE email = '<email>'
+ WHERE email = lower(trim('<email>'))
    AND (user_id = <user_id> OR user_id IS NULL);
 ```
+
+> **Le `lower(trim(...))` n'est pas décoratif.** Les adresses sont stockées
+> normalisées (`normaliseEmail` dans
+> `backend/src/services/unsubscribeService.js` : `trim()` puis `toLowerCase()`),
+> et `isSuppressed` normalise la valeur recherchée avant de comparer. Coller
+> `Contact@Exemple.FR` tel quel dans un `WHERE email = '...'` ne renvoie donc
+> **rien**, alors même que l'adresse est bel et bien désinscrite — et un
+> opérateur en conclut à tort qu'il peut la contacter. La colonne n'a pas de
+> `lower()` côté base : c'est la valeur cherchée qu'il faut normaliser, comme
+> ci-dessus. Même remarque pour toute recherche ponctuelle du type
+> `WHERE email LIKE '%...%'`.
 
 Il n'existe pas non plus de mécanisme, dans le code, pour réinscrire une
 adresse : la seule façon de retirer une suppression est de supprimer la

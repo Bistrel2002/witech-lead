@@ -34,6 +34,15 @@ decided on 2026-08-06 to launch email-only, after the discovery that an
 alphanumeric Twilio Sender ID is one-way and therefore cannot receive the `STOP`
 replies French law requires for marketing SMS.
 
+WhatsApp was removed from the product entirely. **SMS is disabled in-product**,
+not removed: `validateChannel` (`backend/src/routes.js`) refuses
+`channel: 'sms'` at campaign creation, `assertChannelSendable`
+(`backend/src/services/emailService.js`) refuses it on every send path, and the
+SMS channel button in the campaign wizard is rendered disabled and labelled
+« Bientôt disponible ». The Twilio sending code in `runCampaignBackground` and
+the Twilio platform config are deliberately left in place — this is a switch,
+not a deletion, and it flips back once `STOP` handling exists.
+
 ## Suppression model
 
 Suppression is **per-tenant for voluntary unsubscribes, global for spam
@@ -180,7 +189,17 @@ address again.
 
 ## Out of scope
 
-- Any SMS or WhatsApp opt-out (`STOP` handling). Email-only launch.
+- Any SMS or WhatsApp opt-out (`STOP` handling). Email-only launch — and,
+  because there is no `STOP` handling, **the SMS channel itself is switched
+  off** rather than merely left without an opt-out. A tenant cannot create or
+  run an SMS campaign; both the creation guard and the send guard refuse it
+  with a French "not yet available" message. Re-enabling SMS requires, at
+  minimum: a two-way Twilio number (an alphanumeric Sender ID cannot receive
+  anything), an inbound-SMS route that records `STOP`/`ARRET` into
+  `unsubscribes`, the suppression check extended to phone numbers, and a
+  mention of the opt-out keyword in the message body. Until all of that
+  exists, `DISABLED_CHANNELS` in `backend/src/routes.js` must keep listing
+  `sms`.
 - A tenant-facing UI listing their unsubscribes. The data is recorded correctly;
   surfacing it is a later feature.
 - Re-subscribe. A recipient who opts out stays opted out; there is no legitimate

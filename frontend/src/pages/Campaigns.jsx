@@ -19,6 +19,14 @@ import {
   MinusCircle
 } from 'lucide-react';
 
+/**
+ * SMS is deliberately disabled in-product. Mirrors SMS_UNAVAILABLE_MESSAGE in
+ * backend/src/services/emailService.js, which is what actually refuses the
+ * channel; this is only the reason shown before the click.
+ */
+const SMS_COMING_SOON_HINT =
+  "Le canal SMS n'est pas encore disponible : il sera activé une fois la gestion des réponses STOP en place, comme l'exige la réglementation française.";
+
 export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
   const [templates, setTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -251,6 +259,12 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       alert('Veuillez remplir tous les champs');
       return;
     }
+    if (newCampaign.channel !== 'email') {
+      // Belt and braces with the disabled channel button: nothing in this
+      // component may post a non-email channel while SMS is switched off.
+      alert(SMS_COMING_SOON_HINT);
+      return;
+    }
     if (sendingBlockReason) {
       alert(sendingBlockReason);
       return;
@@ -400,7 +414,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       <div>
         <h2 className="text-2xl font-heading font-extrabold text-slate-800">Campagnes d'Outreach</h2>
         <p className="text-slate-500 text-sm mt-1">
-          Configurez vos modèles et lancez des campagnes automatisées par Email ou SMS.
+          Configurez vos modèles et lancez des campagnes automatisées par e-mail. Le canal SMS arrive bientôt.
         </p>
       </div>
 
@@ -557,13 +571,27 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     <Mail className="w-5 h-5 mb-1.5" />
                     Email
                   </button>
+                  {/*
+                    SMS is built but switched off product-wide: the shared
+                    alphanumeric Twilio Sender ID is one-way and cannot receive
+                    the STOP replies French law requires for marketing SMS, so
+                    an SMS campaign would have no opt-out at all. The button
+                    stays visible and disabled rather than disappearing, so the
+                    channel reads as planned rather than missing. The backend
+                    refuses channel 'sms' as well — this is a label, not a gate.
+                  */}
                   <button
                     type="button"
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'sms' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
-                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'sms', category: '' })}
+                    disabled
+                    aria-disabled="true"
+                    title={SMS_COMING_SOON_HINT}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed"
                   >
                     <Smartphone className="w-5 h-5 mb-1.5" />
                     SMS
+                    <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Bientôt disponible
+                    </span>
                   </button>
                 </div>
               </div>

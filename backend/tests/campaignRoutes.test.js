@@ -18,9 +18,8 @@ test.beforeEach(() => {
 
 // --- Minor 11: reject an unusable channel at creation, not at send time -----
 
-test('validateChannel accepts the two supported channels', () => {
+test('validateChannel accepts the one channel that can actually be delivered', () => {
   assert.deepEqual(validateChannel('email'), { ok: true, channel: 'email' });
-  assert.deepEqual(validateChannel('sms'), { ok: true, channel: 'sms' });
 });
 
 test('validateChannel defaults to email when the channel is omitted', () => {
@@ -31,7 +30,33 @@ test('validateChannel defaults to email when the channel is omitted', () => {
 
 test('validateChannel normalises case and surrounding space', () => {
   assert.deepEqual(validateChannel(' EMAIL '), { ok: true, channel: 'email' });
-  assert.deepEqual(validateChannel('Sms'), { ok: true, channel: 'sms' });
+});
+
+// --- Critical 1: SMS is disabled in-product until STOP handling exists ------
+
+test('campaign creation refuses channel sms', () => {
+  // The UI greys SMS out, but the UI is not a security control: a direct API
+  // call must not be able to create an SMS campaign. Without STOP handling,
+  // an SMS campaign is unsolicited French B2B marketing with no opt-out of
+  // any kind and no route into the suppression table.
+  const result = validateChannel('sms');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /SMS/);
+  assert.match(result.error, /pas encore disponible/i);
+});
+
+test('campaign creation refuses sms whatever its casing or padding', () => {
+  for (const spelling of [' SMS ', 'Sms', 'sMs']) {
+    const result = validateChannel(spelling);
+    assert.equal(result.ok, false, `${spelling} must be refused`);
+    assert.match(result.error, /pas encore disponible/i);
+  }
+});
+
+test('the refusal for sms and the refusal for a bogus channel are not the same message', () => {
+  // A customer who picks an unavailable-but-planned channel needs to be told
+  // it is coming, not that they sent garbage.
+  assert.notEqual(validateChannel('sms').error, validateChannel('telegram').error);
 });
 
 test('validateChannel rejects a channel the sender cannot honour', () => {
@@ -46,12 +71,15 @@ test('validateChannel rejects a channel the sender cannot honour', () => {
 
 test('a channel validateChannel accepts is one assertChannelSendable understands', () => {
   // Guards the seam between the two: a channel accepted at creation must not
-  // be one the sender then refuses at run time.
+  // be one the sender then refuses at run time — and, now, the reverse: a
+  // channel the sender refuses must not be creatable.
   const ready = { send_subdomain: '7.mail.witechagency.com', send_subdomain_status: 'verified', sending_paused_at: null };
-  for (const channel of ['email', 'sms']) {
+  for (const channel of ['email']) {
     const { channel: normalized } = validateChannel(channel);
     assert.doesNotThrow(() => assertChannelSendable(ready, normalized));
   }
+  assert.equal(validateChannel('sms').ok, false);
+  assert.throws(() => assertChannelSendable(ready, 'sms'));
 });
 
 // --- Important 7: campaign ownership on the two lead-queueing routes --------

@@ -126,8 +126,22 @@ test('a paused tenant is blocked on every channel', () => {
   assert.throws(() => assertChannelSendable(paused, 'sms'), /suspendu/);
 });
 
-test('sms does not require a verified email domain', () => {
-  assert.doesNotThrow(() => assertChannelSendable({ sending_paused_at: null }, 'sms'));
+// --- Critical 1: SMS is disabled in-product until STOP handling exists ------
+
+test('sms is refused with a French "not yet available" message', () => {
+  // An alphanumeric Twilio Sender ID is one-way, so it cannot receive the
+  // STOP replies French law requires for marketing SMS. Until that exists the
+  // channel must not send: there is no unsubscribe link, no STOP, and no way
+  // into the suppression table for an SMS recipient.
+  assert.throws(
+    () => assertChannelSendable({ sending_paused_at: null }, 'sms'),
+    /pas encore disponible/i
+  );
+  assert.throws(() => assertChannelSendable({ sending_paused_at: null }, 'sms'), /SMS/);
+});
+
+test('sms is refused even for a fully verified tenant', () => {
+  assert.throws(() => assertChannelSendable(verified, 'sms'), /pas encore disponible/i);
 });
 
 test('whatsapp is rejected as unsupported', () => {

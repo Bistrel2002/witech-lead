@@ -49,6 +49,23 @@ export function buildEmailPayload({ user, prospect, subject, body, unsubscribeUr
 }
 
 /**
+ * SMS is built but deliberately switched off, product-wide.
+ *
+ * The shared Twilio Sender ID is alphanumeric and therefore one-way: it cannot
+ * receive the `STOP` replies French law requires for marketing SMS. An SMS
+ * campaign would consequently carry no unsubscribe link, no STOP keyword and
+ * no route into the `unsubscribes` table — the one guarantee the whole opt-out
+ * feature exists to make. The owner's decision (2026-08-06) is to launch
+ * email-only and re-enable SMS once STOP handling exists, so the sending code
+ * in `runCampaignBackground` and the Twilio config stay in place.
+ *
+ * Exported so the campaign-creation guard in routes.js refuses with exactly
+ * the same sentence the send path would.
+ */
+export const SMS_UNAVAILABLE_MESSAGE =
+  "Le canal SMS n'est pas encore disponible : il sera activé une fois la gestion des réponses STOP en place, comme l'exige la réglementation française. Utilisez l'e-mail pour le moment.";
+
+/**
  * Throws with a customer-readable French message when this campaign must not
  * send. Pure: takes the joined campaign+user row, touches nothing else.
  */
@@ -66,9 +83,12 @@ export function assertChannelSendable(campaign, channel) {
     }
     return;
   }
-  if (channel !== 'sms') {
-    throw new Error(`Canal non supporté : ${channel}.`);
+  if (channel === 'sms') {
+    // Defence in depth. Creation already refuses SMS, but a campaign created
+    // before this guard existed must not resume sending either.
+    throw new Error(SMS_UNAVAILABLE_MESSAGE);
   }
+  throw new Error(`Canal non supporté : ${channel}.`);
 }
 
 /**

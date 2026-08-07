@@ -1,13 +1,28 @@
 import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
-import { runCampaignBackground, assertChannelSendable } from './services/emailService.js';
+import { runCampaignBackground, assertChannelSendable, SMS_UNAVAILABLE_MESSAGE } from './services/emailService.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 
 const router = express.Router();
 
-/** Channels the platform can actually deliver on. */
+/** Channels the codebase knows how to address at all. */
 export const SUPPORTED_CHANNELS = new Set(['email', 'sms']);
+
+/**
+ * Channels that exist in code but are switched off in-product.
+ *
+ * SMS is disabled pending `STOP` handling — see SMS_UNAVAILABLE_MESSAGE in
+ * emailService.js for why. Kept separate from SUPPORTED_CHANNELS so the
+ * customer gets "coming soon" rather than "you sent garbage", and so
+ * re-enabling the channel is a one-line change here.
+ */
+export const DISABLED_CHANNELS = new Set(['sms']);
+
+/** Channels a tenant may actually create a campaign on today. */
+export const AVAILABLE_CHANNELS = new Set(
+  [...SUPPORTED_CHANNELS].filter((c) => !DISABLED_CHANNELS.has(c))
+);
 
 /**
  * Validates a campaign channel at creation time.
@@ -24,8 +39,13 @@ export function validateChannel(channel) {
   if (typeof normalized !== 'string' || !SUPPORTED_CHANNELS.has(normalized)) {
     return {
       ok: false,
-      error: `Canal non supporté : ${String(channel)}. Canaux disponibles : email, sms.`
+      error: `Canal non supporté : ${String(channel)}. Canaux disponibles : ${[...AVAILABLE_CHANNELS].join(', ')}.`
     };
+  }
+  if (DISABLED_CHANNELS.has(normalized)) {
+    // The frontend greys this channel out, but the frontend is not a security
+    // control: a direct POST /api/campaigns must be refused here too.
+    return { ok: false, error: SMS_UNAVAILABLE_MESSAGE };
   }
   return { ok: true, channel: normalized };
 }
