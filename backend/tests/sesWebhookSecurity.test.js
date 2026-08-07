@@ -15,11 +15,12 @@ const TOKEN = 'correct-horse-battery-staple-token';
  * pattern-matched the same way the other test files in this suite fake out
  * AWS clients (see sendingDomainService.test.js's fakeSes).
  */
-function fakeDb({ users = [], events = [] } = {}) {
+function fakeDb({ users = [], events = [], unsubscribes = [] } = {}) {
   const calls = { get: [], run: [] };
   return {
     calls,
     events,
+    unsubscribes,
     async get(sql, ...params) {
       calls.get.push({ sql, params });
       if (/FROM users WHERE send_subdomain/.test(sql)) {
@@ -66,6 +67,11 @@ function fakeDb({ users = [], events = [] } = {}) {
       if (/UPDATE campaigns SET status/.test(sql)) {
         return { changes: 0 };
       }
+      if (/INSERT INTO unsubscribes/.test(sql)) {
+        const [user_id, email, source] = params;
+        unsubscribes.push({ user_id, email, source });
+        return { lastID: unsubscribes.length, changes: 1 };
+      }
       throw new Error(`fakeDb.run: unhandled query: ${sql}`);
     }
   };
@@ -96,6 +102,18 @@ function bounceNotification({ messageId, domain = '7.mail.witechagency.com', rec
       eventType: 'Bounce',
       mail: { source: `no-reply@${domain}` },
       bounce: { bouncedRecipients: [{ emailAddress: recipient }] }
+    })
+  });
+}
+
+function complaintNotification({ messageId, domain = '7.mail.witechagency.com', recipient = 'x@y.fr' } = {}) {
+  return JSON.stringify({
+    Type: 'Notification',
+    MessageId: messageId,
+    Message: JSON.stringify({
+      eventType: 'Complaint',
+      mail: { source: `no-reply@${domain}` },
+      complaint: { complainedRecipients: [{ emailAddress: recipient }] }
     })
   });
 }
@@ -316,4 +334,23 @@ test('a tenant genuinely offending inside the window is still paused', async () 
   const db = fakeDb({ users: [{ id: 1, sending_paused_at: null }], events });
   await pauseIfComplaintRateExceeded(db, 1);
   assert.equal(pausedIn(db), true, '1/20 in window is at the 5% threshold');
+});
+
+// --- Complaints create a platform-wide suppression --------------------------
+
+test('a complaint suppresses the recipient for every tenant', async () => {
+  const db = fakeDb({ users: [{ id: 7, send_subdomain: '7.mail.witechagency.com' }] });
+  const res = fakeRes();
+
+  await handleSesEvent(
+    { query: { token: TOKEN }, body: complaintNotification({ messageId: 'm-1', recipient: 'angry@exemple.fr' }) },
+    res,
+    { expectedToken: TOKEN, getDb: async () => db }
+  );
+
+  assert.equal(res.statusCode, 200);
+  const row = db.unsubscribes.find((u) => u.email === 'angry@exemple.fr');
+  assert.ok(row, 'complaint should create an unsubscribes row');
+  assert.equal(row.user_id, null, 'suppression must be global, not scoped to the complaining tenant');
+  assert.equal(row.source, 'complaint');
 });

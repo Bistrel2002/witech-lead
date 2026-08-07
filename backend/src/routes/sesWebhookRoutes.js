@@ -3,6 +3,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { getDb } from '../database/db.js';
 import { getPlatformConfig } from '../config/platformConfig.js';
+import { recordUnsubscribe } from '../services/unsubscribeService.js';
 
 const router = express.Router();
 
@@ -254,6 +255,12 @@ export async function handleSesEvent(req, res, deps = {}) {
     );
 
     if (event.eventType === 'Complaint') {
+      // Global (user_id NULL): an address that files spam complaints threatens
+      // the reputation of the shared sending infrastructure, so no tenant may
+      // contact it again — not just the one that triggered this complaint.
+      if (event.recipient) {
+        await recordUnsubscribe(db, null, event.recipient, 'complaint');
+      }
       await pauseIfComplaintRateExceeded(db, user.id);
     }
 
