@@ -3,6 +3,7 @@ import twilio from 'twilio';
 import { getDb } from '../database/db.js';
 import { getPlatformConfig } from '../config/platformConfig.js';
 import { buildFromAddress } from './sendingDomainService.js';
+import { buildUnsubscribeUrl, isSuppressed } from './unsubscribeService.js';
 
 let sesClientInstance = null;
 
@@ -21,18 +22,25 @@ function sanitizeDisplayName(name) {
   return String(name || "Wi'Tech Agency").replace(/["\\\r\n]/g, '');
 }
 
-export function buildEmailPayload({ user, prospect, subject, body }) {
+export function buildEmailPayload({ user, prospect, subject, body, unsubscribeUrl }) {
   const cfg = getPlatformConfig();
+  const simple = {
+    Subject: { Data: subject, Charset: 'UTF-8' },
+    Body: { Text: { Data: body, Charset: 'UTF-8' } }
+  };
+  if (unsubscribeUrl) {
+    // Gmail and Outlook require both of these from bulk senders; the SESv2
+    // Simple content shape supports Headers directly, so no raw MIME needed.
+    simple.Headers = [
+      { Name: 'List-Unsubscribe', Value: `<${unsubscribeUrl}>` },
+      { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }
+    ];
+  }
   const payload = {
     FromEmailAddress: `"${sanitizeDisplayName(user.name)}" <${buildFromAddress(user.send_subdomain)}>`,
     ReplyToAddresses: [user.email],
     Destination: { ToAddresses: [prospect.email] },
-    Content: {
-      Simple: {
-        Subject: { Data: subject, Charset: 'UTF-8' },
-        Body: { Text: { Data: body, Charset: 'UTF-8' } }
-      }
-    }
+    Content: { Simple: simple }
   };
   if (cfg.aws.sesConfigurationSet) {
     payload.ConfigurationSetName = cfg.aws.sesConfigurationSet;
@@ -84,7 +92,8 @@ export function compileTemplate(text, data) {
     city: data.city || 'votre ville',
     sender_name: senderName,
     sender_phone: data.sender_phone || '',
-    sender_signature: data.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,')
+    sender_signature: data.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,'),
+    unsubscribe_link: data.unsubscribe_link || ''
   };
 
   Object.entries(replacements).forEach(([key, val]) => {
@@ -93,6 +102,17 @@ export function compileTemplate(text, data) {
   });
 
   return compiled;
+}
+
+/**
+ * The compliance backstop. A tenant editing a template — or writing one from
+ * scratch — must not be able to send a message with no way out of the list, so
+ * if the compiled body does not already carry the link we append it.
+ */
+export function appendUnsubscribeNotice(body, unsubscribeUrl) {
+  if (!unsubscribeUrl) return body;
+  if (body && body.includes(unsubscribeUrl)) return body;
+  return `${body || ''}\n\n---\nPour vous désinscrire et ne plus recevoir de messages de notre part : ${unsubscribeUrl}`;
 }
 
 // Map to keep track of active background campaign runs
@@ -188,7 +208,22 @@ export async function runCampaignBackground(campaignId) {
         continue;
       }
 
+      if (channel === 'email' && await isSuppressed(db, campaign.user_id, prospect.email)) {
+        // Skipped, not Failed: honouring an opt-out is a correct outcome, and
+        // counting it as a failure would corrupt the campaign health metrics
+        // the operator uses to spot genuinely broken tenants.
+        await db.run(
+          "UPDATE campaign_logs SET status = 'Skipped', error_message = 'Destinataire désinscrit' WHERE id = ?",
+          prospect.log_id
+        );
+        continue;
+      }
+
       try {
+        const unsubscribeUrl = channel === 'email'
+          ? buildUnsubscribeUrl(campaign.user_id, prospect.email)
+          : null;
+
         const templateData = {
           company_name: prospect.name,
           website: prospect.website,
@@ -197,11 +232,15 @@ export async function runCampaignBackground(campaignId) {
           // Not the operator's name: see the fallback note in compileTemplate.
           sender_name: campaign.user_name || '',
           sender_phone: campaign.user_phone || '',
-          sender_signature: campaign.user_signature || ''
+          sender_signature: campaign.user_signature || '',
+          unsubscribe_link: unsubscribeUrl || ''
         };
 
         const subject = compileTemplate(campaign.subject, templateData);
-        const body = compileTemplate(campaign.body, templateData);
+        const compiledBody = compileTemplate(campaign.body, templateData);
+        const body = channel === 'email'
+          ? appendUnsubscribeNotice(compiledBody, unsubscribeUrl)
+          : compiledBody;
 
         if (channel === 'email') {
           await getSesClient().send(new SendEmailCommand(buildEmailPayload({
@@ -212,7 +251,8 @@ export async function runCampaignBackground(campaignId) {
             },
             prospect,
             subject,
-            body
+            body,
+            unsubscribeUrl
           })));
         } else {
           await twilioClient.messages.create({

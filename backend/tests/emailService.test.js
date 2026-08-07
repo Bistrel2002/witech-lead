@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resetPlatformConfigCache } from '../src/config/platformConfig.js';
-import { buildEmailPayload, compileTemplate, assertChannelSendable } from '../src/services/emailService.js';
+import { buildEmailPayload, compileTemplate, assertChannelSendable, appendUnsubscribeNotice } from '../src/services/emailService.js';
 
 test.beforeEach(() => {
   Object.assign(process.env, {
@@ -132,4 +132,43 @@ test('sms does not require a verified email domain', () => {
 
 test('whatsapp is rejected as unsupported', () => {
   assert.throws(() => assertChannelSendable({ sending_paused_at: null }, 'whatsapp'), /non supporté/);
+});
+
+test('compileTemplate substitutes the unsubscribe link', () => {
+  const out = compileTemplate('Bonjour\n{{unsubscribe_link}}', {
+    unsubscribe_link: 'https://api.example.com/unsubscribe/abc'
+  });
+  assert.equal(out, 'Bonjour\nhttps://api.example.com/unsubscribe/abc');
+});
+
+test('appendUnsubscribeNotice adds the link when the template omits it', () => {
+  const out = appendUnsubscribeNotice('Bonjour', 'https://api.example.com/unsubscribe/abc');
+  assert.ok(out.startsWith('Bonjour'));
+  assert.ok(out.includes('https://api.example.com/unsubscribe/abc'));
+  assert.ok(/désinscrire/i.test(out), 'notice should be French');
+});
+
+test('appendUnsubscribeNotice does not double-append', () => {
+  const url = 'https://api.example.com/unsubscribe/abc';
+  const already = `Bonjour\n\nPour ne plus recevoir: ${url}`;
+  assert.equal(appendUnsubscribeNotice(already, url), already);
+});
+
+test('buildEmailPayload sets both List-Unsubscribe headers', () => {
+  const payload = buildEmailPayload({
+    user,
+    prospect: { email: 'p@e.fr' },
+    subject: 's',
+    body: 'b',
+    unsubscribeUrl: 'https://api.example.com/unsubscribe/abc'
+  });
+  const headers = payload.Content.Simple.Headers;
+  const byName = Object.fromEntries(headers.map((h) => [h.Name, h.Value]));
+  assert.equal(byName['List-Unsubscribe'], '<https://api.example.com/unsubscribe/abc>');
+  assert.equal(byName['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+});
+
+test('buildEmailPayload omits Headers when no unsubscribe URL is supplied', () => {
+  const payload = buildEmailPayload({ user, prospect: { email: 'p@e.fr' }, subject: 's', body: 'b' });
+  assert.equal(payload.Content.Simple.Headers, undefined);
 });

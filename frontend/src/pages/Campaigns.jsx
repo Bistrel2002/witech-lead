@@ -15,7 +15,8 @@ import {
   ChevronRight,
   ExternalLink,
   Edit2,
-  Smartphone
+  Smartphone,
+  MinusCircle
 } from 'lucide-react';
 
 export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
@@ -996,6 +997,11 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           <span className="text-red-500 flex items-center gap-1 font-semibold" title={log.error_message}>
                             <XCircle className="w-3.5 h-3.5" />
                             Échec
+                          </span>
+                        ) : log.status === 'Skipped' ? (
+                          <span className="text-slate-500 flex items-center gap-1 font-semibold" title={log.error_message}>
+                            <MinusCircle className="w-3.5 h-3.5" />
+                            Ignoré
                           </span>
                         ) : (
                           <span className="text-slate-400 flex items-center gap-1">
