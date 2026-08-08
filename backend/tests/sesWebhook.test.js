@@ -68,3 +68,29 @@ test('returns null rather than throwing on a malformed event', () => {
   assert.equal(extractDeliveryEvent({}), null);
   assert.equal(extractDeliveryEvent({ eventType: 'Bounce' }), null);
 });
+
+// Regression: AWS sends a human-readable sentence in `Message` on a
+// SubscriptionConfirmation, not JSON. Parsing it unconditionally threw, the
+// outer catch swallowed it, and the confirmation branch was never reached —
+// so every real subscription stayed PendingConfirmation forever. Every
+// previous fixture omitted `Message`, which no real SNS payload ever does.
+test('a real SubscriptionConfirmation (non-JSON Message) parses instead of throwing', () => {
+  const parsed = parseSnsNotification(JSON.stringify({
+    Type: 'SubscriptionConfirmation',
+    MessageId: 'abc-123',
+    TopicArn: 'arn:aws:sns:eu-west-3:304970596241:witech-ses-events',
+    Message: 'You have chosen to subscribe to the topic arn:aws:sns:eu-west-3:1:t.\nTo confirm the subscription, visit the SubscribeURL included in this message.',
+    SubscribeURL: 'https://sns.eu-west-3.amazonaws.com/?Action=ConfirmSubscription&Token=xyz'
+  }));
+  assert.equal(parsed.type, 'SubscriptionConfirmation');
+  assert.equal(parsed.subscribeUrl, 'https://sns.eu-west-3.amazonaws.com/?Action=ConfirmSubscription&Token=xyz');
+  assert.equal(parsed.message, null, 'a non-JSON Message becomes null, it must not throw');
+});
+
+test('a Notification with a non-JSON Message does not throw either', () => {
+  const parsed = parseSnsNotification(JSON.stringify({
+    Type: 'Notification',
+    Message: 'plain text, not json'
+  }));
+  assert.equal(parsed.message, null);
+});
