@@ -1,5 +1,9 @@
 # Configuration unique de la plateforme d'envoi (SES + Twilio)
 
+> 📘 **Ce document explique *comment faire*.** Pour comprendre *pourquoi* chaque
+> brique existe — SES, SNS, Route 53, DKIM, SPF, les sous-domaines par client —
+> en langage non technique, voir [`infrastructure-expliquee.md`](infrastructure-expliquee.md).
+
 Ce document décrit tout ce qu'un opérateur humain doit faire, **une seule fois**,
 avant que Witech Lead puisse envoyer un seul e-mail réel. (Le canal SMS est
 désactivé dans le produit — voir l'étape 5 ; seules les étapes 1 à 4 et 6 sont
