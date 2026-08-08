@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -11,7 +13,14 @@ import { getDb } from './database/db.js';
 import { getPlatformConfig } from './config/platformConfig.js';
 import { authenticateUser } from './middlewares/authMiddleware.js';
 
-dotenv.config();
+// Resolve the env file from this file's own location, never from the current
+// working directory. `dotenv.config()` with no path reads ./.env relative to
+// cwd, so `npm run dev --prefix backend` (cwd = backend/) loaded a different
+// file than `node backend/src/index.js` (cwd = repo root). A stale duplicate
+// at backend/.env therefore shadowed the real one for months, and every fix
+// applied to the root file was silently ignored by the running server.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(HERE, '../../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
