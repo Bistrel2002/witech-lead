@@ -1,42 +1,94 @@
-import nodemailer from 'nodemailer';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import twilio from 'twilio';
 import { getDb } from '../database/db.js';
+import { getPlatformConfig } from '../config/platformConfig.js';
+import { buildFromAddress } from './sendingDomainService.js';
+import { buildUnsubscribeUrl, isSuppressed } from './unsubscribeService.js';
 
-/**
- * Creates a Nodemailer transport from SMTP configurations
- */
-function createTransport(smtpConfig) {
-  const port = parseInt(smtpConfig.smtp_port) || 587;
-  const isSecure = port === 465;
+let sesClientInstance = null;
 
-  return nodemailer.createTransport({
-    host: smtpConfig.smtp_host,
-    port: port,
-    secure: isSecure,
-    auth: {
-      user: smtpConfig.smtp_user,
-      pass: smtpConfig.smtp_pass
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+function getSesClient() {
+  if (!sesClientInstance) {
+    sesClientInstance = new SESv2Client({ region: getPlatformConfig().aws.region });
+  }
+  return sesClientInstance;
 }
 
 /**
- * Tests connection with SMTP settings
+ * Quotes are stripped rather than escaped: a display name is cosmetic, and
+ * stripping is the one transformation that cannot produce a malformed header.
  */
-export async function testSmtpConnection(config) {
-  try {
-    if (!config.smtp_host || !config.smtp_user || !config.smtp_pass) {
-      throw new Error('SMTP host, user, and password are required');
-    }
-    const transporter = createTransport(config);
-    await transporter.verify();
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
+function sanitizeDisplayName(name) {
+  return String(name || "Wi'Tech Agency").replace(/["\\\r\n]/g, '');
+}
+
+export function buildEmailPayload({ user, prospect, subject, body, unsubscribeUrl }) {
+  const cfg = getPlatformConfig();
+  const simple = {
+    Subject: { Data: subject, Charset: 'UTF-8' },
+    Body: { Text: { Data: body, Charset: 'UTF-8' } }
+  };
+  if (unsubscribeUrl) {
+    // Gmail and Outlook require both of these from bulk senders; the SESv2
+    // Simple content shape supports Headers directly, so no raw MIME needed.
+    simple.Headers = [
+      { Name: 'List-Unsubscribe', Value: `<${unsubscribeUrl}>` },
+      { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }
+    ];
   }
+  const payload = {
+    FromEmailAddress: `"${sanitizeDisplayName(user.name)}" <${buildFromAddress(user.send_subdomain)}>`,
+    ReplyToAddresses: [user.email],
+    Destination: { ToAddresses: [prospect.email] },
+    Content: { Simple: simple }
+  };
+  if (cfg.aws.sesConfigurationSet) {
+    payload.ConfigurationSetName = cfg.aws.sesConfigurationSet;
+  }
+  return payload;
+}
+
+/**
+ * SMS is built but deliberately switched off, product-wide.
+ *
+ * The shared Twilio Sender ID is alphanumeric and therefore one-way: it cannot
+ * receive the `STOP` replies French law requires for marketing SMS. An SMS
+ * campaign would consequently carry no unsubscribe link, no STOP keyword and
+ * no route into the `unsubscribes` table — the one guarantee the whole opt-out
+ * feature exists to make. The owner's decision (2026-08-06) is to launch
+ * email-only and re-enable SMS once STOP handling exists, so the sending code
+ * in `runCampaignBackground` and the Twilio config stay in place.
+ *
+ * Exported so the campaign-creation guard in routes.js refuses with exactly
+ * the same sentence the send path would.
+ */
+export const SMS_UNAVAILABLE_MESSAGE =
+  "Le canal SMS n'est pas encore disponible : il sera activé une fois la gestion des réponses STOP en place, comme l'exige la réglementation française. Utilisez l'e-mail pour le moment.";
+
+/**
+ * Throws with a customer-readable French message when this campaign must not
+ * send. Pure: takes the joined campaign+user row, touches nothing else.
+ */
+export function assertChannelSendable(campaign, channel) {
+  if (campaign.sending_paused_at) {
+    throw new Error(
+      "Envoi suspendu pour ce compte suite à un taux de plainte trop élevé. Contactez le support."
+    );
+  }
+  if (channel === 'email') {
+    if (!campaign.send_subdomain || campaign.send_subdomain_status !== 'verified') {
+      throw new Error(
+        "Votre domaine d'envoi n'est pas encore vérifié. Réessayez dans quelques minutes."
+      );
+    }
+    return;
+  }
+  if (channel === 'sms') {
+    // Defence in depth. Creation already refuses SMS, but a campaign created
+    // before this guard existed must not resume sending either.
+    throw new Error(SMS_UNAVAILABLE_MESSAGE);
+  }
+  throw new Error(`Canal non supporté : ${channel}.`);
 }
 
 /**
@@ -45,15 +97,23 @@ export async function testSmtpConnection(config) {
 export function compileTemplate(text, data) {
   if (!text) return '';
   let compiled = text;
-  
+
+  // Sender-side fallbacks must never name the operator. This text goes out
+  // under the TENANT's name, from the TENANT's subdomain, to the TENANT's
+  // prospects — so defaulting to "Wi'Tech Agency" / "L'équipe Wi'Tech" put
+  // the platform operator's agency name inside a paying customer's outbound
+  // mail, and did it precisely for the customers who had configured the
+  // least. Derive the fallback from the tenant, or say nothing.
+  const senderName = data.sender_name || '';
   const replacements = {
     company_name: data.company_name || 'votre entreprise',
     website: data.website || 'votre site internet',
     phone: data.phone || 'votre numéro',
     city: data.city || 'votre ville',
-    sender_name: data.sender_name || "Wi'Tech Agency",
+    sender_name: senderName,
     sender_phone: data.sender_phone || '',
-    sender_signature: data.sender_signature || "Cordialement,\nL'équipe Wi'Tech"
+    sender_signature: data.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,'),
+    unsubscribe_link: data.unsubscribe_link || ''
   };
 
   Object.entries(replacements).forEach(([key, val]) => {
@@ -64,25 +124,46 @@ export function compileTemplate(text, data) {
   return compiled;
 }
 
+/**
+ * The compliance backstop. A tenant editing a template — or writing one from
+ * scratch — must not be able to send a message with no way out of the list, so
+ * if the compiled body does not already carry the link we append it.
+ */
+export function appendUnsubscribeNotice(body, unsubscribeUrl) {
+  if (!unsubscribeUrl) return body;
+  if (body && body.includes(unsubscribeUrl)) return body;
+  return `${body || ''}\n\n---\nPour vous désinscrire et ne plus recevoir de messages de notre part : ${unsubscribeUrl}`;
+}
+
 // Map to keep track of active background campaign runs
 const activeCampaignRuns = new Set();
 
 /**
- * Processes a campaign (Email, SMS, or WhatsApp) in the background sequentially with delay
+ * Processes a campaign (Email or SMS) in the background sequentially with delay
+ *
+ * `deps` exists only so the send loop can be driven by a test: the compliance
+ * backstop (suppression check before send, Skipped bookkeeping, unsubscribe
+ * URL on every message) lives in here, and it was previously verifiable only
+ * by reading. Production callers pass nothing and get the real database, the
+ * real SES client and the real 5-second stagger.
  */
-export async function runCampaignBackground(campaignId) {
+export async function runCampaignBackground(campaignId, deps = {}) {
   if (activeCampaignRuns.has(campaignId)) return;
   activeCampaignRuns.add(campaignId);
 
-  const db = await getDb();
-  
+  const db = deps.db ?? await getDb();
+  const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+
   try {
     // 1. Fetch Campaign, its Template, and its Owner
     const campaign = await db.get(
-      `SELECT c.*, t.subject, t.body, u.name as user_name, u.email as user_email, u.phone as user_phone 
-       FROM campaigns c 
-       JOIN templates t ON c.template_id = t.id 
-       LEFT JOIN users u ON c.user_id = u.id 
+      `SELECT c.*, t.subject, t.body,
+              u.name AS user_name, u.email AS user_email, u.phone AS user_phone,
+              u.sender_signature AS user_signature,
+              u.send_subdomain, u.send_subdomain_status, u.sending_paused_at
+       FROM campaigns c
+       JOIN templates t ON c.template_id = t.id
+       LEFT JOIN users u ON c.user_id = u.id
        WHERE c.id = ?`,
       campaignId
     );
@@ -94,35 +175,13 @@ export async function runCampaignBackground(campaignId) {
     const channel = campaign.channel || 'email';
     console.log(`CampaignService: Starting campaign run for ID ${campaignId} on channel [${channel}]...`);
 
-    // 2. Fetch Settings
-    const settingsList = await db.all('SELECT key, value FROM settings');
-    const settings = settingsList.reduce((acc, curr) => {
-      acc[curr.key] = curr.value;
-      return acc;
-    }, {});
-
-    // Validate channel configurations
-    if (channel === 'email') {
-      if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
-        throw new Error('SMTP is not configured in settings. Cannot run email campaign.');
-      }
-    } else {
-      if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
-        throw new Error('Twilio Account SID or Auth Token is missing in settings. Cannot run message campaign.');
-      }
-      if (channel === 'sms' && !settings.twilio_phone_number) {
-        throw new Error('Twilio SMS Sender Phone Number is missing in settings.');
-      }
-      if (channel === 'whatsapp' && !settings.twilio_whatsapp_number) {
-        throw new Error('Twilio WhatsApp Sender Phone Number is missing in settings.');
-      }
-    }
+    assertChannelSendable(campaign, channel);
 
     // 3. Fetch prospects queued for this campaign
     const prospects = await db.all(`
-      SELECT l.*, cl.id as log_id 
-      FROM campaign_logs cl 
-      JOIN leads l ON cl.lead_id = l.id 
+      SELECT l.*, cl.id as log_id
+      FROM campaign_logs cl
+      JOIN leads l ON cl.lead_id = l.id
       WHERE cl.campaign_id = ? AND cl.status = 'Pending'
     `, campaignId);
 
@@ -140,20 +199,15 @@ export async function runCampaignBackground(campaignId) {
     );
 
     // Initialize clients
-    let transporter = null;
-    let twilioClient = null;
-
-    if (channel === 'email') {
-      transporter = createTransport(settings);
-    } else {
-      twilioClient = twilio(settings.twilio_account_sid, settings.twilio_auth_token);
-    }
-
-    const fromAddress = settings.smtp_from || settings.smtp_user;
-    const fromName = settings.smtp_name || "Wi'Tech Agency";
+    const cfg = getPlatformConfig();
+    const sesClient = deps.sesClient ?? getSesClient();
+    const twilioClient = channel === 'sms'
+      ? (deps.twilioClient ?? twilio(cfg.twilio.accountSid, cfg.twilio.authToken))
+      : null;
 
     let sentCount = 0;
     let failedCount = 0;
+    let skippedCount = 0;
 
     for (const prospect of prospects) {
       // Check if campaign was canceled or paused
@@ -173,7 +227,7 @@ export async function runCampaignBackground(campaignId) {
         continue;
       }
 
-      if ((channel === 'sms' || channel === 'whatsapp') && !prospect.phone) {
+      if (channel === 'sms' && !prospect.phone) {
         await db.run(
           "UPDATE campaign_logs SET status = 'Failed', error_message = 'No phone number available' WHERE id = ?",
           prospect.log_id
@@ -183,44 +237,71 @@ export async function runCampaignBackground(campaignId) {
         continue;
       }
 
+      if (channel === 'email' && await isSuppressed(db, campaign.user_id, prospect.email)) {
+        // Skipped, not Failed: honouring an opt-out is a correct outcome, and
+        // counting it as a failure would corrupt the campaign health metrics
+        // the operator uses to spot genuinely broken tenants.
+        //
+        // sent_at is set even though nothing was sent: it is the moment this
+        // prospect was resolved. Left NULL, the row reads "En attente" in the
+        // time column beside an "Ignoré" badge on the same line.
+        await db.run(
+          "UPDATE campaign_logs SET status = 'Skipped', error_message = 'Destinataire désinscrit', sent_at = CURRENT_TIMESTAMP WHERE id = ?",
+          prospect.log_id
+        );
+        // Counted, because total_leads counts this prospect. A skip that
+        // increments nothing leaves the campaign for ever showing
+        // "7 / 10 cibles — 70%" with no account of the missing three, and the
+        // customer concludes we silently dropped their emails.
+        skippedCount++;
+        await db.run(
+          'UPDATE campaigns SET skipped_count = ? WHERE id = ?',
+          skippedCount,
+          campaignId
+        );
+        continue;
+      }
+
       try {
+        const unsubscribeUrl = channel === 'email'
+          ? buildUnsubscribeUrl(campaign.user_id, prospect.email)
+          : null;
+
         const templateData = {
           company_name: prospect.name,
           website: prospect.website,
           phone: prospect.phone,
           city: prospect.city,
-          sender_name: campaign.user_name || settings.smtp_name || "Wi'Tech Agency",
+          // Not the operator's name: see the fallback note in compileTemplate.
+          sender_name: campaign.user_name || '',
           sender_phone: campaign.user_phone || '',
-          sender_signature: settings.sender_signature
+          sender_signature: campaign.user_signature || '',
+          unsubscribe_link: unsubscribeUrl || ''
         };
 
         const subject = compileTemplate(campaign.subject, templateData);
-        const body = compileTemplate(campaign.body, templateData);
+        const compiledBody = compileTemplate(campaign.body, templateData);
+        const body = channel === 'email'
+          ? appendUnsubscribeNotice(compiledBody, unsubscribeUrl)
+          : compiledBody;
 
         if (channel === 'email') {
-          // Send Email
-          await transporter.sendMail({
-            from: `"${fromName}" <${fromAddress}>`,
-            to: prospect.email,
-            subject: subject,
-            text: body
-          });
-        } else if (channel === 'sms') {
-          // Send SMS
+          await sesClient.send(new SendEmailCommand(buildEmailPayload({
+            user: {
+              name: campaign.user_name,
+              email: campaign.user_email,
+              send_subdomain: campaign.send_subdomain
+            },
+            prospect,
+            subject,
+            body,
+            unsubscribeUrl
+          })));
+        } else {
           await twilioClient.messages.create({
-            body: body,
-            from: settings.twilio_phone_number,
+            body,
+            from: cfg.twilio.senderId,
             to: prospect.phone
-          });
-        } else if (channel === 'whatsapp') {
-          // Send WhatsApp (prepend whatsapp: prefix as required by Twilio)
-          const cleanPhone = prospect.phone.replace(/\s+/g, '');
-          const formattedTo = cleanPhone.startsWith('+') ? cleanPhone : `+33${cleanPhone.slice(1)}`;
-          
-          await twilioClient.messages.create({
-            body: body,
-            from: `whatsapp:${settings.twilio_whatsapp_number.trim()}`,
-            to: `whatsapp:${formattedTo}`
           });
         }
 
@@ -233,7 +314,7 @@ export async function runCampaignBackground(campaignId) {
         // Update Lead Status
         await db.run("UPDATE leads SET status = 'Contacted' WHERE id = ?", prospect.lead_id);
         sentCount++;
-        
+
       } catch (err) {
         console.error(`CampaignService: Error sending to lead ${prospect.name}:`, err.message);
         await db.run(
@@ -253,7 +334,7 @@ export async function runCampaignBackground(campaignId) {
       );
 
       // Delay between messages (5 seconds stagger queue)
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await sleep(5000);
     }
 
     // Complete campaign run

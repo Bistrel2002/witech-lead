@@ -15,9 +15,25 @@ import {
   ChevronRight,
   ExternalLink,
   Edit2,
-  MessageSquare,
-  Smartphone
+  Smartphone,
+  MinusCircle
 } from 'lucide-react';
+
+/**
+ * SMS is deliberately disabled in-product. Mirrors SMS_UNAVAILABLE_MESSAGE in
+ * backend/src/services/emailService.js, which is what actually refuses the
+ * channel; this is only the reason shown before the click.
+ */
+const SMS_COMING_SOON_HINT =
+  "Le canal SMS n'est pas encore disponible : il sera activé une fois la gestion des réponses STOP en place, comme l'exige la réglementation française.";
+
+/**
+ * Shown when the manual send actions are held back because the prospect's
+ * unsubscribe link has not been obtained from the backend. Sending a
+ * prospecting e-mail by hand does not make an opt-out link optional.
+ */
+const UNSUBSCRIBE_LINK_PENDING =
+  "Le lien de désinscription de ce prospect n'est pas encore disponible. Chaque e-mail de prospection doit en contenir un — patientez quelques instants ou actualisez la page.";
 
 export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
   const [templates, setTemplates] = useState([]);
@@ -38,10 +54,28 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
 
+  // Platform sending status for this tenant. null = not yet known.
+  const [sending, setSending] = useState(null);
+
+  // Real unsubscribe link for the prospect currently shown in the preview.
+  // The frontend cannot mint one: the token is an HMAC over a server-side
+  // secret, so it comes from GET /api/unsubscribe-link.
+  const [previewUnsubscribe, setPreviewUnsubscribe] = useState({ email: null, url: null });
+
+  const loadSendingStatus = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/sending-status`, { credentials: 'include' });
+      if (res.ok) setSending(await res.json());
+    } catch (err) {
+      console.error('Failed to load sending status', err);
+    }
+  };
+
   // Load Templates & Campaigns on Mount
   useEffect(() => {
     loadTemplates();
     loadCampaigns();
+    loadSendingStatus();
     return () => {
       if (pollingInterval) clearInterval(pollingInterval);
     };
@@ -49,7 +83,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const loadTemplates = async () => {
     try {
-      const res = await fetch(`${apiHost}/api/templates`);
+      const res = await fetch(`${apiHost}/api/templates`, { credentials: 'include' });
       if (res.ok) setTemplates(await res.json());
     } catch (err) {
       console.error('Failed to load templates', err);
@@ -58,7 +92,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const loadCampaigns = async () => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns`);
+      const res = await fetch(`${apiHost}/api/campaigns`, { credentials: 'include' });
       if (res.ok) setCampaigns(await res.json());
     } catch (err) {
       console.error('Failed to load campaigns', err);
@@ -72,7 +106,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     // Poll every 2 seconds
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`);
+        const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setSelectedCampaignDetails(data);
@@ -94,20 +128,36 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     setPollingInterval(interval);
   };
 
-  // Compile individual draft mock-previews on the client side
-  const compileClientDraft = (text, lead) => {
+  /**
+   * Client-side preview of a compiled draft.
+   *
+   * Mirrors compileTemplate in backend/src/services/emailService.js, including
+   * its fallbacks — deliberately, and it must stay that way. This preview used
+   * to default sender_name to "Wi'Tech Agency" and the signature to
+   * "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com",
+   * which is the exact leak the backend was rewritten to eliminate: the mail
+   * goes out under the TENANT's name, from the TENANT's mailbox, to the
+   * TENANT's prospects, so a customer who had not set a signature and used
+   * "Ouvrir Gmail" sent a pitch signed with the operator's agency name and
+   * URL. Derive the fallback from the tenant, or say nothing.
+   */
+  const compileClientDraft = (text, lead, unsubscribeUrl) => {
     if (!text || !lead) return '';
     let compiled = text;
-    
-    const signature = currentUser?.sender_signature || "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com";
+
+    const senderName = currentUser?.name || '';
     const replacements = {
       company_name: lead.name || 'votre entreprise',
       website: lead.website || 'votre site internet',
       phone: lead.phone || 'votre numéro',
       city: lead.city || 'votre ville',
-      sender_name: currentUser?.name || "Wi'Tech Agency",
+      sender_name: senderName,
       sender_phone: currentUser?.phone || '',
-      sender_signature: signature
+      sender_signature:
+        currentUser?.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,'),
+      // Without this the tenant saw — and sent — the literal
+      // {{unsubscribe_link}} the moment they used the merge tag.
+      unsubscribe_link: unsubscribeUrl || ''
     };
 
     Object.entries(replacements).forEach(([key, val]) => {
@@ -118,6 +168,65 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     return compiled;
   };
 
+  /**
+   * Mirrors appendUnsubscribeNotice in backend/src/services/emailService.js.
+   *
+   * The preview has to show what actually leaves, and the manual mailto/Gmail
+   * path has to carry a real opt-out: it is a genuine send to a genuine
+   * prospect, and nothing about it being triggered by hand makes an
+   * unsubscribe link optional.
+   */
+  const appendClientUnsubscribeNotice = (body, unsubscribeUrl) => {
+    if (!unsubscribeUrl) return body;
+    if (body && body.includes(unsubscribeUrl)) return body;
+    return `${body || ''}\n\n---\nPour vous désinscrire et ne plus recevoir de messages de notre part : ${unsubscribeUrl}`;
+  };
+
+  /**
+   * Why this campaign cannot be launched right now, or null.
+   *
+   * Mirrors assertChannelSendable on the backend, which is what actually
+   * enforces it — this exists so the customer sees the reason before clicking
+   * rather than after. `sending === null` means the status has not loaded yet;
+   * we do not block on that, the backend's 400 is the real gate.
+   */
+  const sendingBlockReason = (() => {
+    if (!sending) return null;
+    if (sending.pausedAt) {
+      return "Envoi suspendu pour ce compte suite à un taux de plainte trop élevé. Contactez le support.";
+    }
+    if (newCampaign.channel === 'email' && sending.status !== 'verified') {
+      if (sending.status === 'failed') {
+        return "La préparation de votre infrastructure d'envoi a échoué. Ouvrez « Configurations & Outils » et cliquez sur Actualiser, puis contactez le support si le problème persiste.";
+      }
+      return "Votre domaine d'envoi n'est pas encore vérifié — cela prend généralement quelques minutes après l'inscription. Vous pouvez suivre l'état dans « Configurations & Outils ».";
+    }
+    return null;
+  })();
+
+  /**
+   * Progress of the campaign being monitored.
+   *
+   * Skipped recipients belong in the denominator's numerator: total_leads
+   * counts every prospect, and a suppressed one increments neither sent_count
+   * nor failed_count. Leaving it out made a 10-prospect campaign with 3
+   * suppressed finish "Terminée" at "7 / 10 cibles — 70%", which reads as
+   * three emails silently dropped.
+   */
+  const campaignProgress = (() => {
+    const c = selectedCampaignDetails?.campaign;
+    if (!c) return { processed: 0, total: 0, skipped: 0, percent: 0 };
+    const skipped = c.skipped_count || 0;
+    const processed = (c.sent_count || 0) + (c.failed_count || 0) + skipped;
+    const total = c.total_leads || 0;
+    return {
+      processed,
+      total,
+      skipped,
+      percent: total > 0 ? Math.round((processed / total) * 100) : 0
+    };
+  })();
+
   // Filter categories depending on selected channel
   const uniqueCategoriesWithContacts = [...new Set(
     leads
@@ -125,7 +234,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         if (newCampaign.channel === 'email') {
           return l.email && l.email.trim() !== '';
         } else {
-          // SMS or WhatsApp require a valid phone number
+          // SMS requires a valid phone number
           return l.phone && l.phone.trim() !== '';
         }
       })
@@ -162,6 +271,48 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     }
   }, [newCampaign.category, newCampaign.channel, leads]);
 
+  // The prospect the preview is currently showing.
+  const previewLead = campaignPreviewLeads[selectedPreviewLeadIdx] || null;
+
+  /**
+   * Fetch the real unsubscribe link for the previewed prospect.
+   *
+   * Only ever for a lead the tenant owns, and always minted server-side: the
+   * signing secret is platform config and must not reach the browser.
+   */
+  useEffect(() => {
+    const email = newCampaign.channel === 'email' ? previewLead?.email : null;
+    // No clearing needed: previewUnsubscribeUrl below only trusts a stored
+    // link whose email matches the prospect on screen, so a leftover value
+    // from the previous prospect is already inert.
+    if (!email) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${apiHost}/api/unsubscribe-link?email=${encodeURIComponent(email)}`,
+          { credentials: 'include' }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setPreviewUnsubscribe({ email, url: res.ok && data.url ? data.url : null });
+      } catch (err) {
+        console.error('Failed to load unsubscribe link', err);
+        if (!cancelled) setPreviewUnsubscribe({ email, url: null });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [apiHost, previewLead?.email, newCampaign.channel]);
+
+  // Non-null only once the link for THIS prospect has come back, so a stale
+  // link from the previously previewed prospect can never be sent.
+  const previewUnsubscribeUrl =
+    previewLead?.email && previewUnsubscribe.email === previewLead.email
+      ? previewUnsubscribe.url
+      : null;
+
   // Handle Template Crud
   const handleTemplateSubmit = async (e) => {
     e.preventDefault();
@@ -173,6 +324,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       const res = await fetch(url, {
         method,
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(templateForm)
       });
@@ -182,9 +334,13 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         setShowTemplateForm(false);
         setEditingTemplate(null);
         setTemplateForm({ name: '', subject: '', body: '' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `Erreur lors de la sauvegarde (${res.status})`);
       }
     } catch (err) {
       console.error(err);
+      alert('Erreur réseau — vérifiez que le serveur backend est en marche.');
     }
   };
 
@@ -197,7 +353,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   const handleDeleteTemplate = async (id) => {
     if (!window.confirm('Voulez-vous supprimer ce modèle ?')) return;
     try {
-      const res = await fetch(`${apiHost}/api/templates/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${apiHost}/api/templates/${id}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) loadTemplates();
     } catch (err) {
       console.error(err);
@@ -209,6 +365,16 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     e.preventDefault();
     if (!newCampaign.name || !newCampaign.template_id || !newCampaign.category) {
       alert('Veuillez remplir tous les champs');
+      return;
+    }
+    if (newCampaign.channel !== 'email') {
+      // Belt and braces with the disabled channel button: nothing in this
+      // component may post a non-email channel while SMS is switched off.
+      alert(SMS_COMING_SOON_HINT);
+      return;
+    }
+    if (sendingBlockReason) {
+      alert(sendingBlockReason);
       return;
     }
 
@@ -228,6 +394,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       const res = await fetch(`${apiHost}/api/campaigns`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -235,9 +402,17 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       if (res.ok) {
         const campaign = await res.json();
         
-        // Auto-trigger background delivery send
-        await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST' });
-        
+        // Auto-trigger background delivery send. /start now refuses with 400
+        // and a readable French reason when this tenant cannot send (domain
+        // not verified yet, account suspended), so surface it instead of
+        // dropping the customer into a campaign that will silently Fail.
+        const startRes = await fetch(`${apiHost}/api/campaigns/${campaign.id}/start`, { method: 'POST', credentials: 'include' });
+        if (!startRes.ok) {
+          const startData = await startRes.json().catch(() => ({}));
+          alert(startData.error || "La campagne a été créée mais n'a pas pu démarrer.");
+          loadSendingStatus();
+        }
+
         await loadCampaigns();
         
         // Open campaign details panel immediately
@@ -256,7 +431,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const viewCampaignDetails = async (campaignId) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`);
+      const res = await fetch(`${apiHost}/api/campaigns/${campaignId}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSelectedCampaignDetails(data);
@@ -273,7 +448,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handlePauseCampaign = async (id) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/pause`, { method: 'POST' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/pause`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         if (pollingInterval) {
           clearInterval(pollingInterval);
@@ -286,50 +461,71 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     }
   };
 
-  const handleResumeCampaign = async (id) => {
+  // Both of these re-enter the same background run, so both can now be
+  // refused with 400 and a reason. Never swallow that silently.
+  const runCampaignAction = async (id, action) => {
     try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/start`, { method: 'POST' });
+      const res = await fetch(`${apiHost}/api/campaigns/${id}/${action}`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         viewCampaignDetails(id);
+        return;
       }
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "La campagne n'a pas pu être relancée.");
+      loadSendingStatus();
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleRestartCampaign = async (id) => {
-    try {
-      const res = await fetch(`${apiHost}/api/campaigns/${id}/restart`, { method: 'POST' });
-      if (res.ok) {
-        viewCampaignDetails(id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const handleResumeCampaign = (id) => runCampaignAction(id, 'start');
+
+  const handleRestartCampaign = (id) => runCampaignAction(id, 'restart');
+
+  /**
+   * The body exactly as it would leave: merge tags compiled, then the
+   * unsubscribe notice appended if the template does not already carry the
+   * link — the same two steps, in the same order, as the SES send path.
+   */
+  const buildPreviewBody = (lead, template) =>
+    appendClientUnsubscribeNotice(
+      compileClientDraft(template?.body || '', lead, previewUnsubscribeUrl),
+      previewUnsubscribeUrl
+    );
 
   // Mailto Link Generator for Manual Outreach option
   const getMailtoLink = (lead, template) => {
     if (!lead || !template) return '#';
-    const compiledSubject = compileClientDraft(template.subject, lead);
-    const compiledBody = compileClientDraft(template.body, lead);
-    return `mailto:${lead.email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
+    const email = lead.email || '';
+    const compiledSubject = compileClientDraft(template.subject || '', lead, previewUnsubscribeUrl);
+    return `mailto:${email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(buildPreviewBody(lead, template))}`;
   };
 
-  // SMS / WhatsApp Link Generator
-  const getMessageLink = (lead, template, type) => {
+  // Direct Gmail Web Compose Link Generator
+  const getGmailLink = (lead, template) => {
     if (!lead || !template) return '#';
-    const compiledBody = compileClientDraft(template.body, lead);
+    const email = lead.email || '';
+    const compiledSubject = compileClientDraft(template.subject || '', lead, previewUnsubscribeUrl);
+    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(buildPreviewBody(lead, template))}`;
+  };
+
+  // SMS Link Generator. WhatsApp is not a channel the platform supports:
+  // campaigns are email or sms only (see validateChannel on the backend).
+  const getMessageLink = (lead, template) => {
+    if (!lead || !template) return '#';
+    const compiledBody = compileClientDraft(template.body || '', lead);
     const cleanPhone = lead.phone ? lead.phone.replace(/[\s\-\(\)]/g, '') : '';
-    if (type === 'whatsapp') {
-      return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(compiledBody)}`;
-    }
     return `sms:${cleanPhone}?body=${encodeURIComponent(compiledBody)}`;
   };
 
   const handleCopyClipboard = (lead, template) => {
-    const compiledBody = compileClientDraft(template.body, lead);
-    navigator.clipboard.writeText(compiledBody);
+    if (!lead || !template) return;
+    // Copying is a send too — the text is pasted straight into a mail client.
+    if (newCampaign.channel === 'email' && !previewUnsubscribeUrl) {
+      alert(UNSUBSCRIBE_LINK_PENDING);
+      return;
+    }
+    navigator.clipboard.writeText(buildPreviewBody(lead, template));
     alert('📝 Message copié dans le presse-papier !');
   };
 
@@ -339,7 +535,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       <div>
         <h2 className="text-2xl font-heading font-extrabold text-slate-800">Campagnes d'Outreach</h2>
         <p className="text-slate-500 text-sm mt-1">
-          Configurez vos modèles et lancez des campagnes automatisées par Email, SMS ou WhatsApp.
+          Configurez vos modèles et lancez des campagnes automatisées par e-mail. Le canal SMS arrive bientôt.
         </p>
       </div>
 
@@ -412,7 +608,14 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Corps du Message *</label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature'].map(tag => (
+                    {/*
+                      unsubscribe_link belongs in this list: without it the
+                      merge tag is invisible to customers and never gets used
+                      deliberately. A template that omits it still gets the
+                      notice appended automatically before sending; including
+                      it here lets a tenant place the link where they want it.
+                    */}
+                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature', 'unsubscribe_link'].map(tag => (
                       <span 
                         key={tag} 
                         className="bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg px-2 py-1 text-2xs text-teal-700 font-mono cursor-pointer transition-colors"
@@ -487,7 +690,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Canal de Prospection *</label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'email' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
@@ -496,21 +699,27 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     <Mail className="w-5 h-5 mb-1.5" />
                     Email
                   </button>
+                  {/*
+                    SMS is built but switched off product-wide: the shared
+                    alphanumeric Twilio Sender ID is one-way and cannot receive
+                    the STOP replies French law requires for marketing SMS, so
+                    an SMS campaign would have no opt-out at all. The button
+                    stays visible and disabled rather than disappearing, so the
+                    channel reads as planned rather than missing. The backend
+                    refuses channel 'sms' as well — this is a label, not a gate.
+                  */}
                   <button
                     type="button"
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'sms' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
-                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'sms', category: '' })}
+                    disabled
+                    aria-disabled="true"
+                    title={SMS_COMING_SOON_HINT}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed"
                   >
                     <Smartphone className="w-5 h-5 mb-1.5" />
                     SMS
-                  </button>
-                  <button
-                    type="button"
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'whatsapp' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
-                    onClick={() => setNewCampaign({ ...newCampaign, channel: 'whatsapp', category: '' })}
-                  >
-                    <MessageSquare className="w-5 h-5 mb-1.5" />
-                    WhatsApp
+                    <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Bientôt disponible
+                    </span>
                   </button>
                 </div>
               </div>
@@ -529,12 +738,42 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible *</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filtrer par Secteur / Métier (Issus de la base)</label>
+                
+                {/* Quick Sector Selector Buttons derived directly from DB leads */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${!newCampaign.category ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    onClick={() => setNewCampaign({ ...newCampaign, category: '' })}
+                  >
+                    Toutes les catégories ({leads.length} prospects)
+                  </button>
+                  {uniqueCategoriesWithContacts.map(cat => {
+                    const count = leads.filter(l => {
+                      const matches = l.category === cat;
+                      return newCampaign.channel === 'email' ? (matches && l.email && l.email.trim() !== '') : (matches && l.phone && l.phone.trim() !== '');
+                    }).length;
+                    const isSelected = newCampaign.category === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isSelected ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                        onClick={() => setNewCampaign({ ...newCampaign, category: isSelected ? '' : cat })}
+                      >
+                        {cat} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible Sélectionnée *</label>
                 <select 
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
                   value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
                 >
-                  <option value="">-- Sélectionnez une catégorie --</option>
+                  <option value="">-- Sélectionnez une catégorie ou un segment --</option>
                   
                   <optgroup label="Segments Globaux (Tous métiers)">
                     {[
@@ -569,7 +808,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     })}
                   </optgroup>
 
-                  <optgroup label="Catégories Professionnelles">
+                  <optgroup label="Secteurs & Catégories de la Base de Données">
                     {uniqueCategoriesWithContacts.map(c => {
                       const count = leads.filter(l => {
                         const hasCat = l.category === c;
@@ -596,15 +835,25 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 </h5>
                 <p className="text-slate-500 text-[11px] leading-normal">
                   {newCampaign.channel === 'email' 
-                    ? "Les e-mails seront envoyés automatiquement via votre connexion SMTP avec une temporisation d'envoi pour protéger votre domaine."
-                    : "Les messages mobiles (SMS/WhatsApp) seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
+                    ? "Les e-mails seront envoyés automatiquement depuis votre infrastructure d'envoi dédiée, avec une temporisation pour protéger votre réputation."
+                    : "Les messages SMS seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
                 </p>
               </div>
 
-              <button 
-                type="submit" 
+              {sendingBlockReason && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-2.5">
+                  <XCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-amber-800 text-[11px] leading-normal font-semibold">
+                    {sendingBlockReason}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
                 className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id}
+                disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id || !!sendingBlockReason}
+                title={sendingBlockReason || undefined}
               >
                 Lancer la Campagne ({campaignPreviewLeads.length} cibles)
               </button>
@@ -662,26 +911,37 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                         Objet : <strong className="text-slate-800">
                           {compileClientDraft(
                             templates.find(t => t.id === parseInt(newCampaign.template_id))?.subject,
-                            campaignPreviewLeads[selectedPreviewLeadIdx]
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            previewUnsubscribeUrl
                           )}
                         </strong>
                       </p>
                     )}
                   </div>
 
-                  {/* Message body preview */}
+                  {/*
+                    Message body preview — the compiled body plus the appended
+                    unsubscribe notice, i.e. what actually leaves. Showing the
+                    body without the notice misrepresented every campaign.
+                  */}
                   <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 font-mono whiteSpace-pre-wrap overflow-y-auto max-h-[200px]">
-                    {compileClientDraft(
-                      templates.find(t => t.id === parseInt(newCampaign.template_id))?.body,
-                      campaignPreviewLeads[selectedPreviewLeadIdx]
+                    {buildPreviewBody(
+                      campaignPreviewLeads[selectedPreviewLeadIdx],
+                      templates.find(t => t.id === parseInt(newCampaign.template_id))
                     )}
                   </div>
-                  
+
+                  {newCampaign.channel === 'email' && !previewUnsubscribeUrl && (
+                    <p className="text-[11px] leading-normal text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      {UNSUBSCRIBE_LINK_PENDING}
+                    </p>
+                  )}
+
                   {/* Action triggers */}
-                  <div className="flex gap-3 pt-2">
+                  <div className="flex flex-wrap gap-2 pt-2">
                     <button 
                       type="button" 
-                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150"
+                      className="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150 shadow-sm"
                       onClick={() => handleCopyClipboard(
                         campaignPreviewLeads[selectedPreviewLeadIdx],
                         templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -690,26 +950,61 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       Copier le corps
                     </button>
                     {newCampaign.channel === 'email' ? (
-                      <a 
-                        href={getMailtoLink(
-                          campaignPreviewLeads[selectedPreviewLeadIdx],
-                          templates.find(t => t.id === parseInt(newCampaign.template_id))
-                        )}
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
-                      >
-                        Ouvrir le client Mail
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                      /*
+                        Both of these open a real message to a real prospect
+                        from the tenant's own mailbox, so they stay disabled
+                        until the prospect's unsubscribe link has arrived —
+                        a hand-triggered prospecting e-mail needs an opt-out
+                        exactly like the automated one does.
+                      */
+                      !previewUnsubscribeUrl ? (
+                        <span
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-400 font-semibold text-xs cursor-not-allowed"
+                          title={UNSUBSCRIBE_LINK_PENDING}
+                        >
+                          Envoi manuel indisponible
+                        </span>
+                      ) : (
+                      <>
+                        <a
+                          href={getMailtoLink(
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            templates.find(t => t.id === parseInt(newCampaign.template_id))
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          title="Ouvrir avec votre logiciel de messagerie par défaut (Apple Mail, Outlook, etc.)"
+                        >
+                          Ouvrir le client Mail
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <a
+                          href={getGmailLink(
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            templates.find(t => t.id === parseInt(newCampaign.template_id))
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-red-600 text-white font-semibold text-xs hover:bg-red-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          title="Ouvrir directement dans Gmail sur le web"
+                        >
+                          Gmail Web
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </>
+                      )
                     ) : (
                       <a 
                         href={getMessageLink(
                           campaignPreviewLeads[selectedPreviewLeadIdx],
-                          templates.find(t => t.id === parseInt(newCampaign.template_id)),
-                          newCampaign.channel
+                          templates.find(t => t.id === parseInt(newCampaign.template_id))
                         )}
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
                       >
-                        {newCampaign.channel === 'whatsapp' ? 'Ouvrir WhatsApp' : 'Ouvrir SMS'}
+                        Ouvrir SMS
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     )}
@@ -743,6 +1038,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     <th className="p-4">Cibles</th>
                     <th className="p-4">Envoyés</th>
                     <th className="p-4">Échecs</th>
+                    <th className="p-4">Ignorés</th>
                     <th className="p-4">Date de Lancement</th>
                     <th className="p-4">Statut</th>
                     <th className="p-4 text-right">Actions</th>
@@ -757,6 +1053,12 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       <td className="p-4 font-bold text-slate-800">{camp.total_leads}</td>
                       <td className="p-4 font-semibold text-emerald-600">{camp.sent_count}</td>
                       <td className={`p-4 font-semibold ${camp.failed_count > 0 ? 'text-red-500' : 'text-slate-400'}`}>{camp.failed_count}</td>
+                      <td
+                        className={`p-4 font-semibold ${(camp.skipped_count || 0) > 0 ? 'text-slate-600' : 'text-slate-400'}`}
+                        title={(camp.skipped_count || 0) > 0 ? "Destinataires désinscrits : ils comptent dans les cibles mais n'ont reçu aucun message." : undefined}
+                      >
+                        {camp.skipped_count || 0}
+                      </td>
                       <td className="p-4 text-xs text-slate-400">{new Date(camp.created_at).toLocaleDateString()}</td>
                       <td className="p-4">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-bold uppercase tracking-wider ${
@@ -811,16 +1113,31 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Progression</span>
                 <div className="flex justify-between text-xs font-semibold text-slate-700 mt-1 mb-2">
-                  <span>{selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count} / {selectedCampaignDetails.campaign.total_leads} cibles</span>
-                  <span>{Math.round(((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100)}%</span>
+                  <span>{campaignProgress.processed} / {campaignProgress.total} cibles</span>
+                  <span>{campaignProgress.percent}%</span>
                 </div>
                 {/* Progress bar */}
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-teal-600 rounded-full transition-all duration-300"
-                    style={{ width: `${((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100}%` }}
+                    style={{ width: `${campaignProgress.percent}%` }}
                   ></div>
                 </div>
+                {/*
+                  A skipped prospect counts in total_leads but is neither sent
+                  nor failed. Naming the number is the point: reconciling the
+                  arithmetic silently would still leave the customer wondering
+                  what happened to the missing recipients.
+                */}
+                {campaignProgress.skipped > 0 && (
+                  <p className="text-[11px] text-slate-500 leading-normal mt-2">
+                    <strong className="text-slate-700">{campaignProgress.skipped}</strong>{' '}
+                    {campaignProgress.skipped > 1 ? 'destinataires désinscrits' : 'destinataire désinscrit'}{' '}
+                    {campaignProgress.skipped > 1 ? 'ont été ignorés' : 'a été ignoré'} : aucun message ne
+                    leur a été envoyé, conformément à leur demande de désinscription. Ils comptent dans
+                    les cibles mais pas dans les envois.
+                  </p>
+                )}
               </div>
 
               {/* Status Actions */}
@@ -885,6 +1202,11 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           <span className="text-red-500 flex items-center gap-1 font-semibold" title={log.error_message}>
                             <XCircle className="w-3.5 h-3.5" />
                             Échec
+                          </span>
+                        ) : log.status === 'Skipped' ? (
+                          <span className="text-slate-500 flex items-center gap-1 font-semibold" title={log.error_message}>
+                            <MinusCircle className="w-3.5 h-3.5" />
+                            Ignoré
                           </span>
                         ) : (
                           <span className="text-slate-400 flex items-center gap-1">

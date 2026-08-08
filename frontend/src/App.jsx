@@ -460,7 +460,7 @@ export default function App() {
             </div>
             
             <p className="text-slate-600 text-sm mb-4 leading-relaxed">
-              Ajoutez votre numéro de téléphone afin que vos campagnes de prospection (SMS, WhatsApp, signatures) puissent y faire référence dynamiquement !
+              Ajoutez votre numéro de téléphone afin que vos campagnes de prospection (SMS, signatures) puissent y faire référence dynamiquement !
             </p>
 
             {promptError && (

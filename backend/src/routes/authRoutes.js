@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { getDb } from '../database/db.js';
 import { authenticateUser } from '../middlewares/authMiddleware.js';
+import { ensureTenantSendingDomain } from '../services/tenantProvisioning.js';
 
 const router = express.Router();
 
@@ -15,6 +16,26 @@ const generateToken = (user) => {
     { expiresIn: '7d' }
   );
 };
+
+/** Columns on `users` a customer may edit through PUT /api/auth/profile. */
+export const PROFILE_EDITABLE_FIELDS = [
+  'name',
+  'email',
+  'phone',
+  'company_name',
+  'company_website',
+  'sender_signature'
+];
+
+export function pickProfileFields(body) {
+  const picked = {};
+  for (const field of PROFILE_EDITABLE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body || {}, field)) {
+      picked[field] = body[field];
+    }
+  }
+  return picked;
+}
 
 // SIGNUP Endpoint
 router.post('/signup', async (req, res) => {
@@ -43,6 +64,10 @@ router.post('/signup', async (req, res) => {
     );
 
     const user = { id: result.lastID, email, name, role, phone: phone || null };
+
+    // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+    ensureTenantSendingDomain(user.id, db);
+
     const token = generateToken(user);
 
     res.cookie('auth_token', token, {
@@ -107,32 +132,62 @@ router.post('/logout', (req, res) => {
 });
 
 // ME Endpoint (Returns current active user)
-router.get('/me', authenticateUser, (req, res) => {
-  res.json({ user: req.user });
+router.get('/me', authenticateUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = await db.get(
+      `SELECT id, email, name, phone, role, company_name, company_website, sender_signature
+       FROM users WHERE id = ?`,
+      req.user.id
+    );
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Update Profile Endpoint
 router.put('/profile', authenticateUser, async (req, res) => {
-  const { name, email, phone } = req.body;
-  if (!email || !name) {
-    return res.status(400).json({ error: 'Le nom et l\'adresse email sont requis.' });
+  const updates = pickProfileFields(req.body);
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'Aucun champ modifiable fourni.' });
+  }
+  if (updates.email !== undefined && !updates.email) {
+    return res.status(400).json({ error: "L'adresse e-mail ne peut pas être vide." });
+  }
+  if (updates.name !== undefined && !updates.name) {
+    return res.status(400).json({ error: 'Le nom ne peut pas être vide.' });
   }
 
   try {
     const db = await getDb();
-    const existing = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, req.user.id);
-    if (existing) {
-      return res.status(400).json({ error: 'Cette adresse e-mail est déjà utilisée par un autre compte.' });
+
+    if (updates.email) {
+      const clash = await db.get(
+        'SELECT id FROM users WHERE email = ? AND id != ?',
+        updates.email, req.user.id
+      );
+      if (clash) {
+        return res.status(400).json({ error: 'Cette adresse e-mail est déjà utilisée.' });
+      }
     }
 
+    const columns = Object.keys(updates);
+    const assignments = columns.map((col) => `${col} = ?`).join(', ');
     await db.run(
-      'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
-      name, email, phone || null, req.user.id
+      `UPDATE users SET ${assignments} WHERE id = ?`,
+      ...columns.map((col) => updates[col]),
+      req.user.id
     );
 
-    const updatedUser = await db.get('SELECT id, email, name, role, phone FROM users WHERE id = ?', req.user.id);
-    const token = generateToken(updatedUser);
+    const user = await db.get(
+      `SELECT id, email, name, phone, role, company_name, company_website, sender_signature
+       FROM users WHERE id = ?`,
+      req.user.id
+    );
 
+    const token = generateToken(user);
     res.cookie('auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -140,7 +195,7 @@ router.put('/profile', authenticateUser, async (req, res) => {
       maxAge: 7 * 24 * 3600 * 1000
     });
 
-    res.json({ user: updatedUser, token });
+    res.json({ token, user });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -280,6 +335,9 @@ router.get('/google/mock-callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      ensureTenantSendingDomain(user.id, db);
     }
 
     const token = generateToken(user);
@@ -350,6 +408,9 @@ router.get('/google/callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      ensureTenantSendingDomain(user.id, db);
     } else if (!user.google_id) {
       await db.run('UPDATE users SET google_id = ? WHERE id = ?', google_id, user.id);
       user.google_id = google_id;
@@ -490,6 +551,13 @@ router.get('/apple/mock-callback', async (req, res) => {
         name: name || email.split('@')[0],
         role: 'user'
       };
+
+      // Fire-and-forget: the customer should not wait on AWS to finish signing up.
+      // Every user-creation site must call this — a user created without a
+      // sending domain cannot send anything, and until refreshTenantSendingStatus
+      // learned to re-provision, omitting it here left the account permanently
+      // unable to run a campaign.
+      ensureTenantSendingDomain(user.id, db);
     }
 
     const token = generateToken(user);

@@ -5,9 +5,12 @@ let pgPoolInstance = null;
 
 // Database Adapter for PostgreSQL
 class DatabaseAdapter {
-  constructor(client) {
+  constructor(client, { reserved = false } = {}) {
     this.client = client;
     this.isPg = true; // Kept for backward compatibility checks
+    // True when `client` is a single checked-out connection rather than a
+    // pool, i.e. we are already inside a transaction.
+    this.reserved = reserved;
   }
 
   _convertSql(sql) {
@@ -54,6 +57,40 @@ class DatabaseAdapter {
   async exec(sql) {
     await this.client.query(sql);
   }
+
+  /**
+   * Runs `fn` against an adapter bound to one reserved connection, wrapped in
+   * BEGIN/COMMIT (ROLLBACK on throw).
+   *
+   * The reservation is the whole point: `pg.Pool.query()` checks out a
+   * connection per call and returns it immediately, so issuing BEGIN, the
+   * writes, and COMMIT as separate pool queries can spread them across
+   * different backends — the BEGIN would isolate nothing and the writes would
+   * each autocommit. Anything needing atomicity must go through here.
+   */
+  async transaction(fn) {
+    if (this.reserved || typeof this.client.connect !== 'function') {
+      // Already inside a transaction: join the caller's rather than nesting.
+      return fn(this);
+    }
+    const client = await this.client.connect();
+    const scoped = new DatabaseAdapter(client, { reserved: true });
+    try {
+      await client.query('BEGIN');
+      const result = await fn(scoped);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Database: ROLLBACK failed:', rollbackError.message);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export async function getDb() {
@@ -89,6 +126,68 @@ export async function getFrenchDb() {
   return await getDb();
 }
 
+/**
+ * One-time backfill: copies the legacy global branding rows (company_name,
+ * company_website, sender_signature — which used to live in `settings`)
+ * onto the OLDEST user, then deletes those rows from `settings`.
+ *
+ * "Oldest user only" is the entire correctness condition. Those legacy
+ * `settings` rows are one specific person's branding: whoever was using the
+ * product back when branding was global — the first registered account.
+ * Copying them onto every user with NULL branding would stamp that tenant's
+ * signature, company name and website permanently onto every other tenant's
+ * row, so every one of them would start mailing prospects under someone
+ * else's identity. That is the exact cross-tenant leak this migration exists
+ * to close, and doing it in a backfill would bake it into per-tenant data
+ * where no later fix can distinguish it from a value the tenant chose. The
+ * `user_id` backfill further down this file scopes itself the same way.
+ *
+ * The DELETE is not optional cleanup: `initPostgresDb` runs on every server
+ * boot, not once. Without it, a customer who signs up between two boots
+ * starts with NULL branding columns; on the next restart this backfill
+ * would find the (never-deleted) legacy rows still in `settings` and
+ * silently copy the *previous global tenant's* signature onto the new
+ * user's NULL columns via the `WHERE ... IS NULL` match — reintroducing
+ * the exact cross-tenant leak this task exists to fix. Deleting the legacy
+ * rows once they're copied makes `legacyBranding` empty on every later
+ * boot, so this whole function becomes a no-op forever after the first
+ * run following this migration.
+ */
+export async function backfillLegacyBranding(db) {
+  const legacyBranding = await db.all(
+    "SELECT key, value FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+  );
+  if (legacyBranding.length === 0) return;
+
+  const legacy = legacyBranding.reduce((acc, row) => {
+    acc[row.key] = row.value;
+    return acc;
+  }, {});
+  // Atomic: if the DELETE landed without the UPDATE the legacy branding would
+  // be lost for good, and if the UPDATE landed without the DELETE the next
+  // boot would replay the copy against whatever rows are NULL by then.
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `UPDATE users
+         SET company_name     = COALESCE(company_name, ?),
+             company_website  = COALESCE(company_website, ?),
+             sender_signature = COALESCE(sender_signature, ?)
+       WHERE id = (SELECT MIN(id) FROM users)
+         AND (company_name IS NULL
+              OR company_website IS NULL
+              OR sender_signature IS NULL)`,
+      legacy.company_name || null,
+      legacy.company_website || null,
+      legacy.sender_signature || null
+    );
+
+    // Retire the legacy rows so this function is a no-op on every future boot.
+    await tx.run(
+      "DELETE FROM settings WHERE key IN ('company_name', 'company_website', 'sender_signature')"
+    );
+  });
+}
+
 async function initPostgresDb(db) {
   // Create users table
   await db.exec(`
@@ -103,6 +202,18 @@ async function initPostgresDb(db) {
       apple_id VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Per-tenant branding. These were global settings rows until 2026-08;
+  // sharing them across tenants leaked one customer's signature into another's
+  // outbound campaigns.
+  await db.exec(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_website TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS sender_signature TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS send_subdomain TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS send_subdomain_status VARCHAR(20) DEFAULT 'pending';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS sending_paused_at TIMESTAMP;
   `);
 
   // Create leads table
@@ -155,6 +266,15 @@ async function initPostgresDb(db) {
     )
   `);
 
+  // A prospect on the suppression list is neither sent nor failed, so without
+  // its own counter it disappeared from every campaign total: total_leads
+  // counted it, (sent_count + failed_count) did not, and the campaign settled
+  // for ever at "7 / 10 cibles — 70%" with nothing explaining the gap.
+  // ADD COLUMN IF NOT EXISTS migrates installs created before it existed.
+  await db.exec(`
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS skipped_count INTEGER DEFAULT 0;
+  `);
+
   // Create campaign_logs table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS campaign_logs (
@@ -165,6 +285,57 @@ async function initPostgresDb(db) {
       error_message TEXT,
       sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Bounce/complaint feedback from SES, used to auto-pause abusive tenants.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS sending_events (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      event_type VARCHAR(30) NOT NULL,
+      recipient VARCHAR(255),
+      sending_domain VARCHAR(255),
+      message_id VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  // SNS delivers at-least-once. message_id (SNS's own MessageId) lets the
+  // webhook dedup a redelivered notification so a single genuine complaint
+  // is never double-counted toward the auto-pause threshold. ADD COLUMN IF
+  // NOT EXISTS migrates installs that created this table before message_id
+  // existed.
+  await db.exec(`
+    ALTER TABLE sending_events ADD COLUMN IF NOT EXISTS message_id VARCHAR(255);
+  `);
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sending_events_user ON sending_events(user_id, event_type);
+  `);
+  await db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sending_events_message_id
+      ON sending_events(message_id) WHERE message_id IS NOT NULL;
+  `);
+
+  // Opt-out suppressions. user_id NULL means global — set when a recipient
+  // files a spam complaint, since an address that complains endangers the
+  // reputation of the whole shared sending infrastructure.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS unsubscribes (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      email VARCHAR(255) NOT NULL,
+      source VARCHAR(20) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  // Two partial indexes rather than one composite: in PostgreSQL NULL is not
+  // equal to NULL, so a plain UNIQUE(user_id, email) would happily accept
+  // unlimited duplicate global rows.
+  await db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribes_tenant
+      ON unsubscribes(user_id, email) WHERE user_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribes_global
+      ON unsubscribes(email) WHERE user_id IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_unsubscribes_email ON unsubscribes(email);
   `);
 
   // Create lead_discussions table
@@ -197,29 +368,24 @@ async function initPostgresDb(db) {
     CREATE INDEX IF NOT EXISTS idx_lead_discussions_lead ON lead_discussions(lead_id);
   `);
 
-  // Insert default settings
-  const defaultSettings = [
-    { key: 'smtp_host', value: '' },
-    { key: 'smtp_port', value: '587' },
-    { key: 'smtp_user', value: '' },
-    { key: 'smtp_pass', value: '' },
-    { key: 'smtp_from', value: '' },
-    { key: 'smtp_name', value: "Wi'Tech Agency" },
-    { key: 'company_name', value: "Wi'Tech Agency" },
-    { key: 'company_website', value: 'https://www.witechagency.com' },
-    { key: 'sender_signature', value: "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com" },
-    { key: 'twilio_account_sid', value: '' },
-    { key: 'twilio_auth_token', value: '' },
-    { key: 'twilio_phone_number', value: '' },
-    { key: 'twilio_whatsapp_number', value: '' }
-  ];
+  // Branding (company_name, company_website, sender_signature) used to be
+  // seeded here as global settings rows. They now live on `users` (see
+  // backfillLegacyBranding below) and ALLOWED_SETTING_KEYS in routes.js is
+  // empty, so nothing may be written to or seeded into `settings` any more.
 
-  for (const setting of defaultSettings) {
-    const existing = await db.get('SELECT key FROM settings WHERE key = ?', setting.key);
-    if (!existing) {
-      await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', setting.key, setting.value);
-    }
-  }
+  // One-time cleanup: sending credentials used to live here and were readable
+  // by every authenticated tenant. They are now platform-owned.
+  // Keys are enumerated rather than matched with LIKE: in PostgreSQL the `_`
+  // in 'smtp_%' is a single-character wildcard, so a pattern match here would
+  // be both wider than intended and easy to misread.
+  await db.run(
+    `DELETE FROM settings WHERE key IN (
+       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'smtp_name',
+       'twilio_account_sid', 'twilio_auth_token', 'twilio_phone_number', 'twilio_whatsapp_number'
+     )`
+  );
+
+  await backfillLegacyBranding(db);
 
   // Seed default templates
   const templatesCount = await db.get('SELECT COUNT(*) as count FROM templates');
