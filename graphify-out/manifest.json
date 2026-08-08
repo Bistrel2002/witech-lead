@@ -20,14 +20,14 @@
     "semantic_hash": "92a2d94fc34a8ed5c73dbdb1e7641765"
   },
   "backend/src/routes.js": {
-    "mtime": 1781705782.015361,
-    "ast_hash": "46e888695fd30a03912e96d06611bbe4",
-    "semantic_hash": "46e888695fd30a03912e96d06611bbe4"
+    "mtime": 1784381838.1351323,
+    "ast_hash": "696982acc65d7351043f783e67ffa4f9",
+    "semantic_hash": "696982acc65d7351043f783e67ffa4f9"
   },
   "backend/src/routes/authRoutes.js": {
     "mtime": 1783078763.398595,
     "ast_hash": "eacd944f0d1cfd2307db8bf0b32012fe",
-    "semantic_hash": ""
+    "semantic_hash": "eacd944f0d1cfd2307db8bf0b32012fe"
   },
   "backend/src/routes/portalRoutes.js": {
     "mtime": 1781027170.3217525,
@@ -67,7 +67,7 @@
   "frontend/src/App.jsx": {
     "mtime": 1783084664.76118,
     "ast_hash": "59e8815ab4ba28d797dc155f7661e5ab",
-    "semantic_hash": ""
+    "semantic_hash": "59e8815ab4ba28d797dc155f7661e5ab"
   },
   "frontend/src/main.jsx": {
     "mtime": 1781030055.175779,
@@ -80,9 +80,9 @@
     "semantic_hash": "112b8926671beac3a19b0a1ad15301fe"
   },
   "frontend/src/pages/Campaigns.jsx": {
-    "mtime": 1781705788.015669,
-    "ast_hash": "81b51f3d49418d3dfdad9849993dacd8",
-    "semantic_hash": "81b51f3d49418d3dfdad9849993dacd8"
+    "mtime": 1784384791.4923036,
+    "ast_hash": "9d2460b432d87946d2c9a2600846a741",
+    "semantic_hash": "9d2460b432d87946d2c9a2600846a741"
   },
   "frontend/src/pages/Dashboard.jsx": {
     "mtime": 1781026987.3096967,
@@ -112,7 +112,7 @@
   "frontend/vite.config.js": {
     "mtime": 1783018879.4128902,
     "ast_hash": "cc32c2264636910356bd738d0450b9f8",
-    "semantic_hash": ""
+    "semantic_hash": "cc32c2264636910356bd738d0450b9f8"
   },
   "package.json": {
     "mtime": 1780301303.829311,
