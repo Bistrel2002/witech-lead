@@ -163,7 +163,7 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
             <Mail className="w-5 h-5 text-blue-500" />
           </div>
           <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{contactedLeads}</div>
-          <div className="text-xs text-slate-500">Campagnes SMTP ou mailto</div>
+          <div className="text-xs text-slate-500">Campagnes e-mail ou mailto</div>
         </div>
 
         {/* Metric 4 */}

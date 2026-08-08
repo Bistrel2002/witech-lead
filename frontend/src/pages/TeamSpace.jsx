@@ -299,7 +299,7 @@ export default function TeamSpace({ apiHost }) {
             </li>
             <li className="flex gap-2">
               <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
-              <span><strong>Régulation Twilio :</strong> Les campagnes SMS/WhatsApp respectent un intervalle automatique de 5 secondes pour préserver la réputation des numéros.</span>
+              <span><strong>Temporisation des envois :</strong> Les campagnes e-mail respectent un intervalle automatique de 5 secondes entre chaque message, pour préserver la réputation d'envoi du domaine.</span>
             </li>
           </ul>
         </div>

@@ -834,9 +834,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   Prospection groupée intelligente
                 </h5>
                 <p className="text-slate-500 text-[11px] leading-normal">
-                  {newCampaign.channel === 'email' 
-                    ? "Les e-mails seront envoyés automatiquement depuis votre infrastructure d'envoi dédiée, avec une temporisation pour protéger votre réputation."
-                    : "Les messages SMS seront planifiés dans la file d'attente et envoyés de manière espacée via l'API Twilio."}
+                  Les e-mails seront envoyés automatiquement depuis votre infrastructure d'envoi dédiée, avec une temporisation pour protéger votre réputation.
                 </p>
               </div>
 
