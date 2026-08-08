@@ -3,6 +3,7 @@ import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
 import { runCampaignBackground, assertChannelSendable, SMS_UNAVAILABLE_MESSAGE } from './services/emailService.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
+import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
 
 const router = express.Router();
 
@@ -1240,6 +1241,44 @@ export function filterSettingsPayload(payload) {
   }
   return { accepted, rejected };
 }
+
+/**
+ * Real unsubscribe link for one of the caller's own leads.
+ *
+ * The campaign preview offers "Ouvrir Gmail" / "Ouvrir le client Mail", and
+ * those are real sends to real prospects from the tenant's own mailbox. They
+ * need a working opt-out exactly like the automated SES path does — but the
+ * frontend cannot mint the token itself: it is an HMAC over the platform's
+ * UNSUBSCRIBE_SECRET, which must never leave the server. So the preview asks
+ * for one here.
+ *
+ * The tenant id comes from the session and nowhere else, so a link can only
+ * ever unsubscribe an address from the caller's own list. The lead-ownership
+ * check keeps a tenant from minting links for addresses they do not hold.
+ */
+export async function handleUnsubscribeLinkPreview(req, res, deps = {}) {
+  const email = typeof req.query?.email === 'string' ? req.query.email.trim() : '';
+  if (!email) {
+    return res.status(400).json({ error: 'Adresse e-mail requise.' });
+  }
+
+  try {
+    const db = deps.db ?? await getDb();
+    const lead = await db.get(
+      'SELECT id FROM leads WHERE user_id = ? AND lower(email) = lower(?) LIMIT 1',
+      req.user.id, email
+    );
+    if (!lead) {
+      return res.status(404).json({ error: 'Ce prospect ne fait pas partie de vos contacts.' });
+    }
+    return res.json({ url: buildUnsubscribeUrl(req.user.id, email) });
+  } catch (error) {
+    console.error('Unsubscribe link preview failed:', error.message);
+    return res.status(500).json({ error: "Le lien de désinscription n'a pas pu être généré." });
+  }
+}
+
+router.get('/unsubscribe-link', (req, res) => handleUnsubscribeLinkPreview(req, res));
 
 // Sending infrastructure status for the logged-in tenant.
 router.get('/sending-status', async (req, res) => {

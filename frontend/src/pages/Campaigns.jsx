@@ -27,6 +27,14 @@ import {
 const SMS_COMING_SOON_HINT =
   "Le canal SMS n'est pas encore disponible : il sera activé une fois la gestion des réponses STOP en place, comme l'exige la réglementation française.";
 
+/**
+ * Shown when the manual send actions are held back because the prospect's
+ * unsubscribe link has not been obtained from the backend. Sending a
+ * prospecting e-mail by hand does not make an opt-out link optional.
+ */
+const UNSUBSCRIBE_LINK_PENDING =
+  "Le lien de désinscription de ce prospect n'est pas encore disponible. Chaque e-mail de prospection doit en contenir un — patientez quelques instants ou actualisez la page.";
+
 export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
   const [templates, setTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -48,6 +56,11 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   // Platform sending status for this tenant. null = not yet known.
   const [sending, setSending] = useState(null);
+
+  // Real unsubscribe link for the prospect currently shown in the preview.
+  // The frontend cannot mint one: the token is an HMAC over a server-side
+  // secret, so it comes from GET /api/unsubscribe-link.
+  const [previewUnsubscribe, setPreviewUnsubscribe] = useState({ email: null, url: null });
 
   const loadSendingStatus = async () => {
     try {
@@ -115,20 +128,36 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     setPollingInterval(interval);
   };
 
-  // Compile individual draft mock-previews on the client side
-  const compileClientDraft = (text, lead) => {
+  /**
+   * Client-side preview of a compiled draft.
+   *
+   * Mirrors compileTemplate in backend/src/services/emailService.js, including
+   * its fallbacks — deliberately, and it must stay that way. This preview used
+   * to default sender_name to "Wi'Tech Agency" and the signature to
+   * "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com",
+   * which is the exact leak the backend was rewritten to eliminate: the mail
+   * goes out under the TENANT's name, from the TENANT's mailbox, to the
+   * TENANT's prospects, so a customer who had not set a signature and used
+   * "Ouvrir Gmail" sent a pitch signed with the operator's agency name and
+   * URL. Derive the fallback from the tenant, or say nothing.
+   */
+  const compileClientDraft = (text, lead, unsubscribeUrl) => {
     if (!text || !lead) return '';
     let compiled = text;
-    
-    const signature = currentUser?.sender_signature || "Cordialement,\nL'équipe Wi'Tech Agency\nhttps://www.witechagency.com";
+
+    const senderName = currentUser?.name || '';
     const replacements = {
       company_name: lead.name || 'votre entreprise',
       website: lead.website || 'votre site internet',
       phone: lead.phone || 'votre numéro',
       city: lead.city || 'votre ville',
-      sender_name: currentUser?.name || "Wi'Tech Agency",
+      sender_name: senderName,
       sender_phone: currentUser?.phone || '',
-      sender_signature: signature
+      sender_signature:
+        currentUser?.sender_signature || (senderName ? `Cordialement,\n${senderName}` : 'Cordialement,'),
+      // Without this the tenant saw — and sent — the literal
+      // {{unsubscribe_link}} the moment they used the merge tag.
+      unsubscribe_link: unsubscribeUrl || ''
     };
 
     Object.entries(replacements).forEach(([key, val]) => {
@@ -137,6 +166,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     });
 
     return compiled;
+  };
+
+  /**
+   * Mirrors appendUnsubscribeNotice in backend/src/services/emailService.js.
+   *
+   * The preview has to show what actually leaves, and the manual mailto/Gmail
+   * path has to carry a real opt-out: it is a genuine send to a genuine
+   * prospect, and nothing about it being triggered by hand makes an
+   * unsubscribe link optional.
+   */
+  const appendClientUnsubscribeNotice = (body, unsubscribeUrl) => {
+    if (!unsubscribeUrl) return body;
+    if (body && body.includes(unsubscribeUrl)) return body;
+    return `${body || ''}\n\n---\nPour vous désinscrire et ne plus recevoir de messages de notre part : ${unsubscribeUrl}`;
   };
 
   /**
@@ -227,6 +270,48 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       setCampaignPreviewLeads([]);
     }
   }, [newCampaign.category, newCampaign.channel, leads]);
+
+  // The prospect the preview is currently showing.
+  const previewLead = campaignPreviewLeads[selectedPreviewLeadIdx] || null;
+
+  /**
+   * Fetch the real unsubscribe link for the previewed prospect.
+   *
+   * Only ever for a lead the tenant owns, and always minted server-side: the
+   * signing secret is platform config and must not reach the browser.
+   */
+  useEffect(() => {
+    const email = newCampaign.channel === 'email' ? previewLead?.email : null;
+    // No clearing needed: previewUnsubscribeUrl below only trusts a stored
+    // link whose email matches the prospect on screen, so a leftover value
+    // from the previous prospect is already inert.
+    if (!email) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${apiHost}/api/unsubscribe-link?email=${encodeURIComponent(email)}`,
+          { credentials: 'include' }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setPreviewUnsubscribe({ email, url: res.ok && data.url ? data.url : null });
+      } catch (err) {
+        console.error('Failed to load unsubscribe link', err);
+        if (!cancelled) setPreviewUnsubscribe({ email, url: null });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [apiHost, previewLead?.email, newCampaign.channel]);
+
+  // Non-null only once the link for THIS prospect has come back, so a stale
+  // link from the previously previewed prospect can never be sent.
+  const previewUnsubscribeUrl =
+    previewLead?.email && previewUnsubscribe.email === previewLead.email
+      ? previewUnsubscribe.url
+      : null;
 
   // Handle Template Crud
   const handleTemplateSubmit = async (e) => {
@@ -397,22 +482,31 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handleRestartCampaign = (id) => runCampaignAction(id, 'restart');
 
+  /**
+   * The body exactly as it would leave: merge tags compiled, then the
+   * unsubscribe notice appended if the template does not already carry the
+   * link — the same two steps, in the same order, as the SES send path.
+   */
+  const buildPreviewBody = (lead, template) =>
+    appendClientUnsubscribeNotice(
+      compileClientDraft(template?.body || '', lead, previewUnsubscribeUrl),
+      previewUnsubscribeUrl
+    );
+
   // Mailto Link Generator for Manual Outreach option
   const getMailtoLink = (lead, template) => {
     if (!lead || !template) return '#';
     const email = lead.email || '';
-    const compiledSubject = compileClientDraft(template.subject || '', lead);
-    const compiledBody = compileClientDraft(template.body || '', lead);
-    return `mailto:${email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
+    const compiledSubject = compileClientDraft(template.subject || '', lead, previewUnsubscribeUrl);
+    return `mailto:${email}?subject=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(buildPreviewBody(lead, template))}`;
   };
 
   // Direct Gmail Web Compose Link Generator
   const getGmailLink = (lead, template) => {
     if (!lead || !template) return '#';
     const email = lead.email || '';
-    const compiledSubject = compileClientDraft(template.subject || '', lead);
-    const compiledBody = compileClientDraft(template.body || '', lead);
-    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(compiledBody)}`;
+    const compiledSubject = compileClientDraft(template.subject || '', lead, previewUnsubscribeUrl);
+    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(compiledSubject)}&body=${encodeURIComponent(buildPreviewBody(lead, template))}`;
   };
 
   // SMS Link Generator. WhatsApp is not a channel the platform supports:
@@ -426,8 +520,12 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
   const handleCopyClipboard = (lead, template) => {
     if (!lead || !template) return;
-    const compiledBody = compileClientDraft(template.body || '', lead);
-    navigator.clipboard.writeText(compiledBody);
+    // Copying is a send too — the text is pasted straight into a mail client.
+    if (newCampaign.channel === 'email' && !previewUnsubscribeUrl) {
+      alert(UNSUBSCRIBE_LINK_PENDING);
+      return;
+    }
+    navigator.clipboard.writeText(buildPreviewBody(lead, template));
     alert('📝 Message copié dans le presse-papier !');
   };
 
@@ -510,7 +608,14 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Corps du Message *</label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature'].map(tag => (
+                    {/*
+                      unsubscribe_link belongs in this list: without it the
+                      merge tag is invisible to customers and never gets used
+                      deliberately. A template that omits it still gets the
+                      notice appended automatically before sending; including
+                      it here lets a tenant place the link where they want it.
+                    */}
+                    {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature', 'unsubscribe_link'].map(tag => (
                       <span 
                         key={tag} 
                         className="bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg px-2 py-1 text-2xs text-teal-700 font-mono cursor-pointer transition-colors"
@@ -806,21 +911,32 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                         Objet : <strong className="text-slate-800">
                           {compileClientDraft(
                             templates.find(t => t.id === parseInt(newCampaign.template_id))?.subject,
-                            campaignPreviewLeads[selectedPreviewLeadIdx]
+                            campaignPreviewLeads[selectedPreviewLeadIdx],
+                            previewUnsubscribeUrl
                           )}
                         </strong>
                       </p>
                     )}
                   </div>
 
-                  {/* Message body preview */}
+                  {/*
+                    Message body preview — the compiled body plus the appended
+                    unsubscribe notice, i.e. what actually leaves. Showing the
+                    body without the notice misrepresented every campaign.
+                  */}
                   <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 font-mono whiteSpace-pre-wrap overflow-y-auto max-h-[200px]">
-                    {compileClientDraft(
-                      templates.find(t => t.id === parseInt(newCampaign.template_id))?.body,
-                      campaignPreviewLeads[selectedPreviewLeadIdx]
+                    {buildPreviewBody(
+                      campaignPreviewLeads[selectedPreviewLeadIdx],
+                      templates.find(t => t.id === parseInt(newCampaign.template_id))
                     )}
                   </div>
-                  
+
+                  {newCampaign.channel === 'email' && !previewUnsubscribeUrl && (
+                    <p className="text-[11px] leading-normal text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      {UNSUBSCRIBE_LINK_PENDING}
+                    </p>
+                  )}
+
                   {/* Action triggers */}
                   <div className="flex flex-wrap gap-2 pt-2">
                     <button 
@@ -834,8 +950,23 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       Copier le corps
                     </button>
                     {newCampaign.channel === 'email' ? (
+                      /*
+                        Both of these open a real message to a real prospect
+                        from the tenant's own mailbox, so they stay disabled
+                        until the prospect's unsubscribe link has arrived —
+                        a hand-triggered prospecting e-mail needs an opt-out
+                        exactly like the automated one does.
+                      */
+                      !previewUnsubscribeUrl ? (
+                        <span
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-400 font-semibold text-xs cursor-not-allowed"
+                          title={UNSUBSCRIBE_LINK_PENDING}
+                        >
+                          Envoi manuel indisponible
+                        </span>
+                      ) : (
                       <>
-                        <a 
+                        <a
                           href={getMailtoLink(
                             campaignPreviewLeads[selectedPreviewLeadIdx],
                             templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -848,7 +979,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           Ouvrir le client Mail
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
-                        <a 
+                        <a
                           href={getGmailLink(
                             campaignPreviewLeads[selectedPreviewLeadIdx],
                             templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -862,6 +993,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       </>
+                      )
                     ) : (
                       <a 
                         href={getMessageLink(

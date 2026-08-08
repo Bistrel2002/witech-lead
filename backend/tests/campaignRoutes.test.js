@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resetPlatformConfigCache } from '../src/config/platformConfig.js';
-import { validateChannel, findOwnedCampaign, loadCampaignForStart } from '../src/routes.js';
+import {
+  validateChannel,
+  findOwnedCampaign,
+  loadCampaignForStart,
+  handleUnsubscribeLinkPreview
+} from '../src/routes.js';
 import { assertChannelSendable } from '../src/services/emailService.js';
+import { verifyUnsubscribeToken } from '../src/services/unsubscribeService.js';
 
 test.beforeEach(() => {
   Object.assign(process.env, {
@@ -11,7 +17,9 @@ test.beforeEach(() => {
     TWILIO_ACCOUNT_SID: 'AC',
     TWILIO_AUTH_TOKEN: 't',
     TWILIO_SENDER_ID: 'WITECH',
-    SES_WEBHOOK_TOKEN: 'tok'
+    SES_WEBHOOK_TOKEN: 'tok',
+    UNSUBSCRIBE_SECRET: 'unsub-secret-for-tests',
+    PUBLIC_API_URL: 'https://api.witechagency.com'
   });
   resetPlatformConfigCache();
 });
@@ -165,4 +173,100 @@ test('a paused tenant starting a campaign gets the suspension reason', () => {
     () => assertChannelSendable(campaign, campaign.channel),
     /Envoi suspendu pour ce compte/
   );
+});
+
+// --- Important 3: the preview's manual send path needs a real opt-out link --
+//
+// The frontend cannot mint an unsubscribe token: the HMAC secret is
+// server-side and must stay there. The "Ouvrir Gmail" / mailto path is a real
+// send to a real prospect, so the preview asks the backend for a real link.
+
+function previewRes() {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.payload = body; return this; }
+  };
+}
+
+function leadsDb(rows = []) {
+  const queries = [];
+  return {
+    queries,
+    async get(sql, ...params) {
+      queries.push({ sql, params });
+      const [userId, email] = params;
+      return rows.find(
+        (r) => r.user_id === userId && r.email.toLowerCase() === String(email).toLowerCase()
+      );
+    }
+  };
+}
+
+test('the preview link is minted for the authenticated tenant', async () => {
+  const db = leadsDb([{ id: 3, user_id: 7, email: 'prospect@exemple.fr' }]);
+  const res = previewRes();
+  await handleUnsubscribeLinkPreview(
+    { user: { id: 7 }, query: { email: 'prospect@exemple.fr' } }, res, { db }
+  );
+
+  assert.equal(res.statusCode, 200);
+  const token = res.payload.url.split('/unsubscribe/')[1];
+  assert.deepEqual(verifyUnsubscribeToken(token), { userId: 7, email: 'prospect@exemple.fr' });
+});
+
+test('the preview link cannot be minted for another tenant', async () => {
+  // The tenant id comes from the session, never from the request body: a
+  // client-supplied user_id must not be able to forge a link that would
+  // unsubscribe an address from someone else's list.
+  const db = leadsDb([{ id: 3, user_id: 7, email: 'prospect@exemple.fr' }]);
+  const res = previewRes();
+  await handleUnsubscribeLinkPreview(
+    { user: { id: 7 }, query: { email: 'prospect@exemple.fr', user_id: 9 } }, res, { db }
+  );
+
+  const token = res.payload.url.split('/unsubscribe/')[1];
+  assert.equal(verifyUnsubscribeToken(token).userId, 7);
+});
+
+test('the preview link is refused for an address that is not the caller\'s lead', async () => {
+  const db = leadsDb([{ id: 3, user_id: 7, email: 'prospect@exemple.fr' }]);
+  const res = previewRes();
+  await handleUnsubscribeLinkPreview(
+    { user: { id: 7 }, query: { email: 'someone@ailleurs.fr' } }, res, { db }
+  );
+  assert.equal(res.statusCode, 404);
+  assert.ok(res.payload.error);
+});
+
+test('the preview link requires an email', async () => {
+  const db = leadsDb([]);
+  const res = previewRes();
+  await handleUnsubscribeLinkPreview({ user: { id: 7 }, query: {} }, res, { db });
+  assert.equal(res.statusCode, 400);
+  assert.equal(db.queries.length, 0);
+});
+
+test('the preview link matches the address case-insensitively', async () => {
+  // Leads are scraped, so their stored casing is whatever the website used;
+  // the token normalises anyway, and a case mismatch must not read as "not
+  // your lead".
+  const db = leadsDb([{ id: 3, user_id: 7, email: 'Prospect@Exemple.FR' }]);
+  const res = previewRes();
+  await handleUnsubscribeLinkPreview(
+    { user: { id: 7 }, query: { email: 'prospect@exemple.fr' } }, res, { db }
+  );
+  assert.equal(res.statusCode, 200);
+});
+
+test('a failure minting the preview link does not escape as a rejection', async () => {
+  const db = { async get() { throw new Error('db down'); } };
+  const res = previewRes();
+  await assert.doesNotReject(() =>
+    handleUnsubscribeLinkPreview(
+      { user: { id: 7 }, query: { email: 'prospect@exemple.fr' } }, res, { db }
+    )
+  );
+  assert.equal(res.statusCode, 500);
 });
