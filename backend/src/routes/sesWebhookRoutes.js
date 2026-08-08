@@ -33,13 +33,31 @@ const COMPLAINT_WINDOW_DAYS = 30;
 /** Timeout for the outbound GET that confirms an SNS subscription. */
 const SNS_CONFIRM_TIMEOUT_MS = 5000;
 
+/**
+ * Only SES *event* notifications carry JSON in `Message`. A
+ * SubscriptionConfirmation carries a human-readable sentence ("You have chosen
+ * to subscribe to the topic … visit the SubscribeURL included in this
+ * message."), and parsing that unconditionally threw — the outer catch
+ * swallowed it, the confirmation branch was never reached, and every real
+ * subscription stayed PendingConfirmation forever. A non-JSON Message is not
+ * an error; it simply carries no event for us to read.
+ */
+function parseMessagePayload(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export function parseSnsNotification(rawBody) {
   const envelope = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
   return {
     type: envelope.Type,
     subscribeUrl: envelope.SubscribeURL || null,
     messageId: envelope.MessageId || null,
-    message: envelope.Message ? JSON.parse(envelope.Message) : null
+    message: parseMessagePayload(envelope.Message)
   };
 }
 
