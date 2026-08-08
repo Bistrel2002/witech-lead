@@ -553,8 +553,8 @@ router.post('/leads', async (req, res) => {
     }
 
     const result = await db.run(
-      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, social_handles || null
     );
     const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
