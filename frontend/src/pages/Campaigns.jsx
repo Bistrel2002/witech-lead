@@ -161,6 +161,29 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     return null;
   })();
 
+  /**
+   * Progress of the campaign being monitored.
+   *
+   * Skipped recipients belong in the denominator's numerator: total_leads
+   * counts every prospect, and a suppressed one increments neither sent_count
+   * nor failed_count. Leaving it out made a 10-prospect campaign with 3
+   * suppressed finish "Terminée" at "7 / 10 cibles — 70%", which reads as
+   * three emails silently dropped.
+   */
+  const campaignProgress = (() => {
+    const c = selectedCampaignDetails?.campaign;
+    if (!c) return { processed: 0, total: 0, skipped: 0, percent: 0 };
+    const skipped = c.skipped_count || 0;
+    const processed = (c.sent_count || 0) + (c.failed_count || 0) + skipped;
+    const total = c.total_leads || 0;
+    return {
+      processed,
+      total,
+      skipped,
+      percent: total > 0 ? Math.round((processed / total) * 100) : 0
+    };
+  })();
+
   // Filter categories depending on selected channel
   const uniqueCategoriesWithContacts = [...new Set(
     leads
@@ -883,6 +906,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     <th className="p-4">Cibles</th>
                     <th className="p-4">Envoyés</th>
                     <th className="p-4">Échecs</th>
+                    <th className="p-4">Ignorés</th>
                     <th className="p-4">Date de Lancement</th>
                     <th className="p-4">Statut</th>
                     <th className="p-4 text-right">Actions</th>
@@ -897,6 +921,12 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       <td className="p-4 font-bold text-slate-800">{camp.total_leads}</td>
                       <td className="p-4 font-semibold text-emerald-600">{camp.sent_count}</td>
                       <td className={`p-4 font-semibold ${camp.failed_count > 0 ? 'text-red-500' : 'text-slate-400'}`}>{camp.failed_count}</td>
+                      <td
+                        className={`p-4 font-semibold ${(camp.skipped_count || 0) > 0 ? 'text-slate-600' : 'text-slate-400'}`}
+                        title={(camp.skipped_count || 0) > 0 ? "Destinataires désinscrits : ils comptent dans les cibles mais n'ont reçu aucun message." : undefined}
+                      >
+                        {camp.skipped_count || 0}
+                      </td>
                       <td className="p-4 text-xs text-slate-400">{new Date(camp.created_at).toLocaleDateString()}</td>
                       <td className="p-4">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-bold uppercase tracking-wider ${
@@ -951,16 +981,31 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Progression</span>
                 <div className="flex justify-between text-xs font-semibold text-slate-700 mt-1 mb-2">
-                  <span>{selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count} / {selectedCampaignDetails.campaign.total_leads} cibles</span>
-                  <span>{Math.round(((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100)}%</span>
+                  <span>{campaignProgress.processed} / {campaignProgress.total} cibles</span>
+                  <span>{campaignProgress.percent}%</span>
                 </div>
                 {/* Progress bar */}
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-teal-600 rounded-full transition-all duration-300"
-                    style={{ width: `${((selectedCampaignDetails.campaign.sent_count + selectedCampaignDetails.campaign.failed_count) / selectedCampaignDetails.campaign.total_leads) * 100}%` }}
+                    style={{ width: `${campaignProgress.percent}%` }}
                   ></div>
                 </div>
+                {/*
+                  A skipped prospect counts in total_leads but is neither sent
+                  nor failed. Naming the number is the point: reconciling the
+                  arithmetic silently would still leave the customer wondering
+                  what happened to the missing recipients.
+                */}
+                {campaignProgress.skipped > 0 && (
+                  <p className="text-[11px] text-slate-500 leading-normal mt-2">
+                    <strong className="text-slate-700">{campaignProgress.skipped}</strong>{' '}
+                    {campaignProgress.skipped > 1 ? 'destinataires désinscrits' : 'destinataire désinscrit'}{' '}
+                    {campaignProgress.skipped > 1 ? 'ont été ignorés' : 'a été ignoré'} : aucun message ne
+                    leur a été envoyé, conformément à leur demande de désinscription. Ils comptent dans
+                    les cibles mais pas dans les envois.
+                  </p>
+                )}
               </div>
 
               {/* Status Actions */}

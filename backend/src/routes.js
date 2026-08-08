@@ -1184,8 +1184,11 @@ router.post('/campaigns/:id/restart', async (req, res) => {
         "UPDATE campaign_logs SET status = 'Pending', error_message = NULL WHERE campaign_id = ?",
         id
       );
+      // skipped_count resets with the others: every log row went back to
+      // Pending, so a stale skip count would be double-counted against the
+      // fresh run's progress denominator.
       await db.run(
-        "UPDATE campaigns SET status = 'Active', sent_count = 0, failed_count = 0 WHERE id = ? AND user_id = ?",
+        "UPDATE campaigns SET status = 'Active', sent_count = 0, failed_count = 0, skipped_count = 0 WHERE id = ? AND user_id = ?",
         id, req.user.id
       );
     } else {

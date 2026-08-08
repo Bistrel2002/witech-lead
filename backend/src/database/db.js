@@ -266,6 +266,15 @@ async function initPostgresDb(db) {
     )
   `);
 
+  // A prospect on the suppression list is neither sent nor failed, so without
+  // its own counter it disappeared from every campaign total: total_leads
+  // counted it, (sent_count + failed_count) did not, and the campaign settled
+  // for ever at "7 / 10 cibles — 70%" with nothing explaining the gap.
+  // ADD COLUMN IF NOT EXISTS migrates installs created before it existed.
+  await db.exec(`
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS skipped_count INTEGER DEFAULT 0;
+  `);
+
   // Create campaign_logs table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS campaign_logs (

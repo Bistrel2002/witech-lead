@@ -140,12 +140,19 @@ const activeCampaignRuns = new Set();
 
 /**
  * Processes a campaign (Email or SMS) in the background sequentially with delay
+ *
+ * `deps` exists only so the send loop can be driven by a test: the compliance
+ * backstop (suppression check before send, Skipped bookkeeping, unsubscribe
+ * URL on every message) lives in here, and it was previously verifiable only
+ * by reading. Production callers pass nothing and get the real database, the
+ * real SES client and the real 5-second stagger.
  */
-export async function runCampaignBackground(campaignId) {
+export async function runCampaignBackground(campaignId, deps = {}) {
   if (activeCampaignRuns.has(campaignId)) return;
   activeCampaignRuns.add(campaignId);
 
-  const db = await getDb();
+  const db = deps.db ?? await getDb();
+  const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
   try {
     // 1. Fetch Campaign, its Template, and its Owner
@@ -193,12 +200,14 @@ export async function runCampaignBackground(campaignId) {
 
     // Initialize clients
     const cfg = getPlatformConfig();
+    const sesClient = deps.sesClient ?? getSesClient();
     const twilioClient = channel === 'sms'
-      ? twilio(cfg.twilio.accountSid, cfg.twilio.authToken)
+      ? (deps.twilioClient ?? twilio(cfg.twilio.accountSid, cfg.twilio.authToken))
       : null;
 
     let sentCount = 0;
     let failedCount = 0;
+    let skippedCount = 0;
 
     for (const prospect of prospects) {
       // Check if campaign was canceled or paused
@@ -232,9 +241,23 @@ export async function runCampaignBackground(campaignId) {
         // Skipped, not Failed: honouring an opt-out is a correct outcome, and
         // counting it as a failure would corrupt the campaign health metrics
         // the operator uses to spot genuinely broken tenants.
+        //
+        // sent_at is set even though nothing was sent: it is the moment this
+        // prospect was resolved. Left NULL, the row reads "En attente" in the
+        // time column beside an "Ignoré" badge on the same line.
         await db.run(
-          "UPDATE campaign_logs SET status = 'Skipped', error_message = 'Destinataire désinscrit' WHERE id = ?",
+          "UPDATE campaign_logs SET status = 'Skipped', error_message = 'Destinataire désinscrit', sent_at = CURRENT_TIMESTAMP WHERE id = ?",
           prospect.log_id
+        );
+        // Counted, because total_leads counts this prospect. A skip that
+        // increments nothing leaves the campaign for ever showing
+        // "7 / 10 cibles — 70%" with no account of the missing three, and the
+        // customer concludes we silently dropped their emails.
+        skippedCount++;
+        await db.run(
+          'UPDATE campaigns SET skipped_count = ? WHERE id = ?',
+          skippedCount,
+          campaignId
         );
         continue;
       }
@@ -263,7 +286,7 @@ export async function runCampaignBackground(campaignId) {
           : compiledBody;
 
         if (channel === 'email') {
-          await getSesClient().send(new SendEmailCommand(buildEmailPayload({
+          await sesClient.send(new SendEmailCommand(buildEmailPayload({
             user: {
               name: campaign.user_name,
               email: campaign.user_email,
@@ -311,7 +334,7 @@ export async function runCampaignBackground(campaignId) {
       );
 
       // Delay between messages (5 seconds stagger queue)
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await sleep(5000);
     }
 
     // Complete campaign run
