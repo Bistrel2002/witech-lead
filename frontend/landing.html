@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="https://www.witechagency.com/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Wi'Tech Lead — le CRM de prospection qui trouve vos clients, écrit, envoie et suit vos campagnes." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Wi'Tech Lead | Le CRM de prospection B2B</title>
+    <script>
+      // Runs before first paint: apply the stored theme so a dark-mode user
+      // never sees a white flash. Duplicated verbatim from index.html on
+      // purpose, rather than loaded from a shared file — a separate script
+      // would only run after first paint and defeat the guard entirely.
+      (function () {
+        try {
+          var t = localStorage.getItem('witech_theme');
+          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        } catch (e) { /* private mode */ }
+        requestAnimationFrame(function () {
+          document.documentElement.classList.add('wt-theme-ready');
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="landing-root"></div>
+    <script type="module" src="/src/landing/main.jsx"></script>
+  </body>
+</html>
