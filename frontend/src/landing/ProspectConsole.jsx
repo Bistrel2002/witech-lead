@@ -146,8 +146,13 @@ export default function ProspectConsole() {
 
         <div className="flex items-center justify-between mt-4 mb-3">
           <div className="font-mono text-[13px] text-fg tabular-nums">
+            {/* Blank until the first result actually lands. `started` alone
+                was not enough: it turns true when the search fires, but no
+                row exists for another 700ms, so the panel sat on "0
+                entreprises trouvées" — which reads as a search that found
+                nothing, the opposite of the point. */}
             <span className="text-accent font-semibold">
-              {frame.started ? frame.count : '—'}
+              {frame.visible > 0 ? frame.count : '—'}
             </span>
             <span className="text-fg-muted"> entreprises trouvées</span>
           </div>
