@@ -82,11 +82,36 @@ export default function ProspectConsole() {
     };
 
     raf = window.requestAnimationFrame(loop);
-    return () => window.cancelAnimationFrame(raf);
+
+    // Same failsafe the scroll reveals carry, for the same reason: the
+    // console's first frame is an empty panel, and it only fills once rAF
+    // runs. If rAF never runs, the hero of the sales page sits blank
+    // forever.
+    //
+    // Scoped to a visible document on purpose. A tab that loads in the
+    // background legitimately gets no frames — the browser suspends rAF —
+    // and nobody is looking, so there is nothing to rescue; it will play
+    // from the top when the visitor arrives. Only silence while someone is
+    // actually watching means something is wrong, and then the finished
+    // state beats an empty one.
+    const failsafe = window.setTimeout(() => {
+      if (!key && document.visibilityState === 'visible') setFrame(FINAL);
+    }, 1500);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(failsafe);
+    };
   }, []);
 
   return (
-    <div className="wt-console-frame shadow-[var(--wt-shadow-lg)]">
+    /* Hidden from assistive tech on purpose. Everything in here is a
+     * labelled demonstration with invented records, and it mutates roughly
+     * every 260ms — a screen reader would get a stream of churn carrying no
+     * information the visitor needs. The hero paragraph beside it already
+     * states the same thing in prose: the product finds the businesses,
+     * writes to each, and tracks who replies. */
+    <div className="wt-console-frame shadow-[var(--wt-shadow-lg)]" aria-hidden="true">
       <div className="p-4 sm:p-5">
 
         <div className="flex items-center justify-between mb-4">

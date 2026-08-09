@@ -91,7 +91,21 @@ export function frameAt(t) {
   };
 }
 
-/** A cheap identity for a frame, so renderers can skip unchanged states. */
+/** A cheap identity for a frame, so renderers can skip unchanged states.
+ *
+ * Must cover every field the console actually renders. The caret flags were
+ * missing at first, which stalled each caret by one character interval: at
+ * t = tradeStart the text is still empty and only typingTrade flips, so the
+ * key was unchanged and the render was skipped. */
 export function frameKey(f) {
-  return `${f.trade}|${f.city}|${f.visible}|${f.sentCount}|${f.searching}|${f.started}`;
+  return [
+    f.trade,
+    f.city,
+    f.visible,
+    f.sentCount,
+    f.searching,
+    f.started,
+    f.typingTrade,
+    f.typingCity
+  ].join('|');
 }

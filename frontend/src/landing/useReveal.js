@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 /**
  * Reveal an element the first time it scrolls into view.
  *
- * Returns a ref to attach and the shown flag. The flag starts false, so the
- * element must carry `.wt-reveal`, whose hidden state only applies while
- * `data-shown` is not 'true'.
+ * Returns a ref to attach and a shown flag. The element must carry
+ * `.wt-reveal`, whose hidden state applies while `data-shown` is not 'true'.
  *
- * Guard: if IntersectionObserver is missing, the element is shown
- * immediately rather than left invisible. A marketing page that renders
- * blank on an old browser is worse than one that does not animate.
+ * Two guards keep that hidden state from becoming a trap, because content
+ * that is invisible until JavaScript says otherwise fails badly when the
+ * JavaScript never speaks: the flag starts true outright when there is no
+ * IntersectionObserver, and a timeout below releases it if an observer was
+ * created but never reported anything.
  */
 export function useReveal({ threshold = 0.18, once = true } = {}) {
   const ref = useRef(null);
