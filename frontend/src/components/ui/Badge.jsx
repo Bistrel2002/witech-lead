@@ -1,8 +1,8 @@
 const TONES = {
   neutral: 'bg-surface-2 text-fg-muted border-line',
-  success: 'bg-[var(--wt-success-soft)] text-[var(--wt-success)] border-[var(--wt-success)]/25',
-  danger: 'bg-[var(--wt-danger-soft)] text-[var(--wt-danger)] border-[var(--wt-danger)]/25',
-  warning: 'bg-[var(--wt-warning-soft)] text-[var(--wt-warning)] border-[var(--wt-warning)]/25',
+  success: 'bg-[var(--wt-success-soft)] text-[var(--wt-success-fg)] border-[var(--wt-success)]/25',
+  danger: 'bg-[var(--wt-danger-soft)] text-[var(--wt-danger-fg)] border-[var(--wt-danger)]/25',
+  warning: 'bg-[var(--wt-warning-soft)] text-[var(--wt-warning-fg)] border-[var(--wt-warning)]/25',
   accent: 'bg-accent-soft text-accent border-accent/25'
 };
 

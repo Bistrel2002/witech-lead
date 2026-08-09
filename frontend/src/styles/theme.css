@@ -21,10 +21,13 @@
   /* Semantic — same meaning in both themes */
   --wt-success: #16a34a;
   --wt-success-soft: #dcfce7;
+  --wt-success-fg: #166534;
   --wt-danger: #dc2626;
   --wt-danger-soft: #fee2e2;
+  --wt-danger-fg: #7f1d1d;
   --wt-warning: #d97706;
   --wt-warning-soft: #fef3c7;
+  --wt-warning-fg: #78350f;
 
   /* Typography */
   --wt-font-display: 'Outfit', system-ui, sans-serif;
@@ -86,8 +89,11 @@
   --wt-rail-line: #251c33;
 
   --wt-success-soft: #082f1a;
+  --wt-success-fg: #86efac;
   --wt-danger-soft: #3b0d0d;
+  --wt-danger-fg: #fca5a5;
   --wt-warning-soft: #3a2606;
+  --wt-warning-fg: #fde047;
 }
 
 /* Expose the tokens to Tailwind so `bg-surface`, `text-fg-muted`,

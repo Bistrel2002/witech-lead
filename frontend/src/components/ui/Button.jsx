@@ -25,6 +25,7 @@ export default function Button({
   const isPrimary = variant === 'primary';
   return (
     <button
+      type="button"
       disabled={disabled || loading}
       // The gradient is the brand mark; it cannot be expressed as a single
       // token, so primary carries it inline while every other colour on the
