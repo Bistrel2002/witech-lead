@@ -12,34 +12,56 @@ function Label({ htmlFor, children }) {
   );
 }
 
-function Help({ error, hint }) {
-  if (error) return <p className="mt-1.5 text-xs text-[var(--wt-danger)]">{error}</p>;
-  if (hint) return <p className="mt-1.5 text-xs text-fg-subtle">{hint}</p>;
+function Help({ id, error, hint }) {
+  if (error) return <p id={id} className="mt-1.5 text-xs text-[var(--wt-danger)]">{error}</p>;
+  if (hint) return <p id={id} className="mt-1.5 text-xs text-fg-subtle">{hint}</p>;
   return null;
 }
 
-export function Input({ label, error, hint, className = '', id: providedId, ...rest }) {
+// The error and the hint occupy the same slot, so one id covers both. It is
+// only handed to aria-describedby when something is actually rendered —
+// pointing at a missing element makes some screen readers announce nothing.
+function useField(providedId) {
   const generatedId = useId();
   const id = providedId || generatedId;
+  return { id, helpId: `${id}-help` };
+}
+
+export function Input({ label, error, hint, className = '', id: providedId, ...rest }) {
+  const { id, helpId } = useField(providedId);
+  const describedBy = error || hint ? helpId : undefined;
 
   return (
     <div className={className}>
       {label && <Label htmlFor={id}>{label}</Label>}
-      <input id={id} className={`${FIELD} ${error ? 'border-[var(--wt-danger)]' : 'border-line'}`} {...rest} />
-      <Help error={error} hint={hint} />
+      <input
+        id={id}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className={`${FIELD} ${error ? 'border-[var(--wt-danger)]' : 'border-line'}`}
+        {...rest}
+      />
+      <Help id={helpId} error={error} hint={hint} />
     </div>
   );
 }
 
 export function Textarea({ label, error, hint, className = '', rows = 5, id: providedId, ...rest }) {
-  const generatedId = useId();
-  const id = providedId || generatedId;
+  const { id, helpId } = useField(providedId);
+  const describedBy = error || hint ? helpId : undefined;
 
   return (
     <div className={className}>
       {label && <Label htmlFor={id}>{label}</Label>}
-      <textarea id={id} rows={rows} className={`${FIELD} ${error ? 'border-[var(--wt-danger)]' : 'border-line'}`} {...rest} />
-      <Help error={error} hint={hint} />
+      <textarea
+        id={id}
+        rows={rows}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className={`${FIELD} ${error ? 'border-[var(--wt-danger)]' : 'border-line'}`}
+        {...rest}
+      />
+      <Help id={helpId} error={error} hint={hint} />
     </div>
   );
 }

@@ -7,9 +7,12 @@ const TONES = {
 };
 
 export default function Badge({ tone = 'neutral', icon: Icon, className = '', children }) {
+  // An unknown tone must not interpolate `undefined` into the class string —
+  // that produces an unstyled, borderless badge. Fall back to neutral.
+  const resolvedTone = TONES[tone] ? tone : 'neutral';
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border
-      text-[11px] font-semibold ${TONES[tone]} ${className}`}>
+      text-[11px] font-semibold ${TONES[resolvedTone]} ${className}`}>
       {Icon && <Icon className="w-3 h-3" />}
       {children}
     </span>
