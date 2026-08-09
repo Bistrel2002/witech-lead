@@ -50,7 +50,11 @@
   --wt-warning-fg: #78350f;
 
   /* Typography */
-  --wt-font-display: 'Outfit', system-ui, sans-serif;
+  /* Bricolage Grotesque is a variable grotesque with optical sizing: it
+   * carries personality at display sizes where Outfit read as the default
+   * geometric sans every SaaS uses. Used for headings only — Inter still
+   * sets every paragraph. */
+  --wt-font-display: 'Bricolage Grotesque', 'Outfit', system-ui, sans-serif;
   --wt-font-body: 'Inter', system-ui, sans-serif;
 
   /* Spacing scale */

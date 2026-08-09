@@ -1,16 +1,17 @@
 import { Check, Mail } from 'lucide-react';
-import { Button, Badge } from '../components/ui';
+import { Button } from '../components/ui';
+import Reveal from './Reveal.jsx';
 
 const CONTACT = 'mailto:contact@witechagency.com?subject=Demande%20d%27information%20Wi%27Tech%20Lead';
 
+/* U+00A0 inside each figure: with an ordinary space a narrow card can wrap
+ * "1 500" as "1" / "500 e-mails". */
 const PLANS = [
   {
     name: 'Starter',
     price: '49',
     pitch: 'Pour démarrer sa prospection',
-    // U+00A0 inside the figure: with an ordinary space a narrow card can
-    // wrap "1 500" as "1" / "500 e-mails". Same in the Agence plan below.
-    emails: '1 500 e-mails / mois',
+    emails: '1 500',
     features: [
       'Prospects illimités',
       'Campagnes illimitées',
@@ -25,7 +26,7 @@ const PLANS = [
     name: 'Pro',
     price: '99',
     pitch: 'Pour une prospection régulière',
-    emails: '5 000 e-mails / mois',
+    emails: '5 000',
     highlighted: true,
     features: [
       'Prospects illimités',
@@ -41,7 +42,7 @@ const PLANS = [
     name: 'Agence',
     price: '249',
     pitch: 'Pour les gros volumes',
-    emails: '15 000 e-mails / mois',
+    emails: '15 000',
     features: [
       'Prospects illimités',
       'Campagnes illimitées',
@@ -57,57 +58,73 @@ const PLANS = [
 
 export default function Pricing() {
   return (
-    <section id="tarifs" className="max-w-6xl mx-auto px-6 py-20">
-      <div className="text-center mb-4">
-        <Badge tone="accent">Essai 14 jours · 100 e-mails · sans carte bancaire</Badge>
-      </div>
-      <h2 className="font-display font-extrabold text-3xl md:text-4xl text-fg text-center">
-        Des tarifs simples
-      </h2>
-      <p className="text-fg-muted text-center mt-3 mb-12 max-w-xl mx-auto">
-        Prospects illimités sur tous les plans. Vous ne payez que le volume d’e-mails.
-      </p>
+    <section id="tarifs" className="relative max-w-6xl mx-auto px-6 py-20 lg:py-24 scroll-mt-16">
+      <Reveal className="text-center max-w-2xl mx-auto mb-14">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+          Tarifs
+        </span>
+        <h2 className="font-display font-extrabold text-3xl lg:text-4xl text-fg tracking-[-0.02em] mt-4">
+          Vous payez le volume, pas le nombre de prospects
+        </h2>
+        <p className="text-fg-muted mt-4 leading-relaxed">
+          Prospects illimités sur les trois plans. Essai 14 jours, 100 e-mails inclus,
+          sans carte bancaire.
+        </p>
+      </Reveal>
 
-      {/* Cards stretch to a common height and the CTA is pushed to the
-          bottom with mt-auto, so the three buttons line up even though the
-          plans list different numbers of features. */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {PLANS.map((plan) => (
-          <div
+      {/* Cards stretch to a common height and the CTA is pushed down with
+          mt-auto, so the three buttons align despite uneven feature counts. */}
+      <div className="grid md:grid-cols-3 gap-6 lg:gap-7">
+        {PLANS.map((plan, i) => (
+          <Reveal
             key={plan.name}
-            className={`relative flex flex-col bg-surface rounded-2xl p-7 border transition-shadow ${
+            delay={i * 90}
+            className={`relative flex flex-col rounded-2xl p-7 lg:p-8 ${
               plan.highlighted
-                ? 'border-accent shadow-[var(--wt-shadow-lg)] md:-mt-3'
-                : 'border-line shadow-[var(--wt-shadow)]'
+                ? 'wt-plan-featured md:-mt-4 md:mb-4'
+                : 'bg-surface border border-line shadow-[var(--wt-shadow)]'
             }`}
           >
             {plan.highlighted && (
               <span
                 style={{ backgroundImage: 'var(--wt-gradient)' }}
                 className="absolute -top-3 left-1/2 -translate-x-1/2 text-white text-[10px]
-                  font-bold uppercase tracking-wider px-3 py-1 rounded-full"
+                  font-bold uppercase tracking-[0.12em] px-3 py-1 rounded-full whitespace-nowrap"
               >
                 Le plus choisi
               </span>
             )}
-            <div className="text-[11px] font-bold uppercase tracking-widest text-accent mb-3">
+
+            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent mb-4">
               {plan.name}
             </div>
+
             <div className="flex items-baseline gap-1.5">
-              <span className="font-display font-extrabold text-4xl text-fg">{plan.price}</span>
-              <span className="text-fg-muted font-semibold">€ TTC /mois</span>
+              <span className="font-display font-extrabold text-5xl text-fg tracking-[-0.03em] tabular-nums">
+                {plan.price}
+              </span>
+              <span className="text-fg-muted font-semibold text-sm">€ TTC /mois</span>
             </div>
-            <p className="text-fg-subtle text-xs mt-2 mb-5">{plan.pitch}</p>
-            <div className="h-px bg-line mb-5" />
-            <div className="font-display font-bold text-fg mb-5">{plan.emails}</div>
-            <ul className="space-y-2.5 mb-7 grow">
+            <p className="text-fg-subtle text-xs mt-2">{plan.pitch}</p>
+
+            <div className="h-px bg-line my-6" />
+
+            <div className="mb-6">
+              <span className="font-display font-extrabold text-2xl text-fg tabular-nums">
+                {plan.emails}
+              </span>
+              <span className="text-fg-muted text-sm font-medium"> e-mails / mois</span>
+            </div>
+
+            <ul className="space-y-3 mb-8 grow">
               {plan.features.map((f) => (
-                <li key={f} className="flex items-start gap-2.5 text-sm text-fg-muted">
-                  <Check className="w-4 h-4 text-[var(--wt-success)] shrink-0 mt-0.5" />
+                <li key={f} className="flex items-start gap-2.5 text-sm text-fg-muted leading-snug">
+                  <Check className="w-4 h-4 text-[var(--wt-success)] shrink-0 mt-px" />
                   <span>{f}</span>
                 </li>
               ))}
             </ul>
+
             <Button
               href={CONTACT}
               variant={plan.highlighted ? 'primary' : 'secondary'}
@@ -117,7 +134,7 @@ export default function Pricing() {
             >
               Nous contacter
             </Button>
-          </div>
+          </Reveal>
         ))}
       </div>
     </section>
