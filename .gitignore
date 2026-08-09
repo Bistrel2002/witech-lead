@@ -43,3 +43,4 @@ _bmad-output/
 *.njsproj
 *.sln
 *.sw?
+.superpowers/
