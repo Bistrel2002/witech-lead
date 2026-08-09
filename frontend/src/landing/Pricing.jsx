@@ -8,7 +8,9 @@ const PLANS = [
     name: 'Starter',
     price: '49',
     pitch: 'Pour démarrer sa prospection',
-    emails: '1 500 e-mails / mois',
+    // U+00A0 inside the figure: with an ordinary space a narrow card can
+    // wrap "1 500" as "1" / "500 e-mails". Same in the Agence plan below.
+    emails: '1 500 e-mails / mois',
     features: [
       'Prospects illimités',
       'Campagnes illimitées',
@@ -47,6 +49,7 @@ const PLANS = [
       'Ciblage avancé sur la base entreprises France',
       'Domaine d’envoi dédié',
       'Désinscription automatique',
+      'Tableau de bord de suivi',
       'Interlocuteur dédié'
     ]
   }
@@ -62,14 +65,17 @@ export default function Pricing() {
         Des tarifs simples
       </h2>
       <p className="text-fg-muted text-center mt-3 mb-12 max-w-xl mx-auto">
-        Prospects illimités sur tous les plans. Vous ne payez que le volume d&apos;e-mails.
+        Prospects illimités sur tous les plans. Vous ne payez que le volume d’e-mails.
       </p>
 
-      <div className="grid md:grid-cols-3 gap-6 items-start">
+      {/* Cards stretch to a common height and the CTA is pushed to the
+          bottom with mt-auto, so the three buttons line up even though the
+          plans list different numbers of features. */}
+      <div className="grid md:grid-cols-3 gap-6">
         {PLANS.map((plan) => (
           <div
             key={plan.name}
-            className={`relative bg-surface rounded-2xl p-7 border transition-shadow ${
+            className={`relative flex flex-col bg-surface rounded-2xl p-7 border transition-shadow ${
               plan.highlighted
                 ? 'border-accent shadow-[var(--wt-shadow-lg)] md:-mt-3'
                 : 'border-line shadow-[var(--wt-shadow)]'
@@ -89,12 +95,12 @@ export default function Pricing() {
             </div>
             <div className="flex items-baseline gap-1.5">
               <span className="font-display font-extrabold text-4xl text-fg">{plan.price}</span>
-              <span className="text-fg-muted font-semibold">€ /mois</span>
+              <span className="text-fg-muted font-semibold">€ TTC /mois</span>
             </div>
             <p className="text-fg-subtle text-xs mt-2 mb-5">{plan.pitch}</p>
             <div className="h-px bg-line mb-5" />
             <div className="font-display font-bold text-fg mb-5">{plan.emails}</div>
-            <ul className="space-y-2.5 mb-7">
+            <ul className="space-y-2.5 mb-7 grow">
               {plan.features.map((f) => (
                 <li key={f} className="flex items-start gap-2.5 text-sm text-fg-muted">
                   <Check className="w-4 h-4 text-[var(--wt-success)] shrink-0 mt-0.5" />
@@ -102,15 +108,15 @@ export default function Pricing() {
                 </li>
               ))}
             </ul>
-            <a href={CONTACT} className="block">
-              <Button
-                variant={plan.highlighted ? 'primary' : 'secondary'}
-                icon={Mail}
-                className="w-full"
-              >
-                Nous contacter
-              </Button>
-            </a>
+            <Button
+              href={CONTACT}
+              variant={plan.highlighted ? 'primary' : 'secondary'}
+              icon={Mail}
+              className="w-full"
+              aria-label={`Nous contacter au sujet du plan ${plan.name}`}
+            >
+              Nous contacter
+            </Button>
           </div>
         ))}
       </div>
