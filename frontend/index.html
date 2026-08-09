@@ -34,10 +34,6 @@
             : 'light';
         }
         if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        // Enable transitions only after the initial theme is settled.
-        requestAnimationFrame(function () {
-          document.documentElement.classList.add('wt-theme-ready');
-        });
       })();
     </script>
   </head>
