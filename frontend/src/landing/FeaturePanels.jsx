@@ -146,7 +146,7 @@ const FAILED = 2;
 const SKIPPED = 6;
 const DELIVERED = TARGETS - FAILED - SKIPPED;
 const LOG_START = 700;
-const LOG_EVERY = 780;
+const LOG_EVERY = 1250;
 
 /* One row is "Ignoré" on purpose: the send path skips addresses that have
  * unsubscribed or been suppressed, and that is worth showing rather than
@@ -163,14 +163,17 @@ export function SendingPanel({ active }) {
   const t = useCycleClock({ cycle: SEND_CYCLE, active });
   const p = easeOut(phase(t, 400, 6800));
   const done = p >= 1;
-  const sent = Math.round(DELIVERED * p);
   const shown = Math.max(0, Math.min(LOG.length, Math.floor((t - LOG_START) / LOG_EVERY) + 1));
 
+  /* All three outcome counters ramp on the same progress value. They used to
+   * sit at zero until the very end, which put the panel in contradiction
+   * with itself: the log showed an "Ignoré" row two seconds before the
+   * Ignorés counter left 0. They now always sum to what has been attempted. */
   const counters = [
     ['Cibles', TARGETS],
-    ['Envoyés', sent],
-    ['Échecs', done ? FAILED : 0],
-    ['Ignorés', done ? SKIPPED : 0]
+    ['Envoyés', Math.round(DELIVERED * p)],
+    ['Échecs', Math.round(FAILED * p)],
+    ['Ignorés', Math.round(SKIPPED * p)]
   ];
 
   return (
