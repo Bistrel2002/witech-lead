@@ -1,4 +1,4 @@
-import { Check, SkipForward } from 'lucide-react';
+import { Check, SkipForward, Search, Mail, Phone, FileText } from 'lucide-react';
 import { useCycleClock, easeOut, phase } from './useCycleClock.js';
 import { RESULTS } from './consoleTimeline.js';
 
@@ -240,75 +240,110 @@ export function SendingPanel({ active }) {
 
 /* ── Suivi des prospects ────────────────────────────────────────────── */
 
-const BOARD_CYCLE = 8000;
-const COLUMNS = [
-  { name: 'Nouveau', count: 25 },
-  { name: 'Contacté', count: 18 },
-  { name: 'RDV fixé', count: 8 },
-  { name: 'Gagné', count: 10 }
-];
+/* The lead record as LeadsManager holds it: the Maps fields it scrapes
+ * (category, city, rating, review count), its pipeline stage, and the
+ * activity log whose types the app defines — Note, Email, Call, Meeting.
+ *
+ * Stage and history advance together, because that is the actual point of
+ * the screen: the history is why the prospect is where it is. */
+
+const BOARD_CYCLE = 9200;
 const MOVE_START = 900;
-const MOVE_EVERY = 1400;
+const MOVE_EVERY = 1500;
+
+const STAGES = ['Nouveau', 'Contacté', 'RDV fixé', 'Proposition', 'Gagné'];
+
+const HISTORY = [
+  { icon: Search, label: 'Importé depuis Google Maps', when: 'il y a 9 j' },
+  { icon: Mail, label: 'E-mail de prospection envoyé', when: 'il y a 6 j' },
+  { icon: Phone, label: 'Appel — rendez-vous fixé', when: 'il y a 3 j' },
+  { icon: FileText, label: 'Proposition envoyée', when: 'il y a 1 j' },
+  { icon: Check, label: 'Affaire signée', when: "aujourd’hui" }
+];
 
 export function PipelinePanel({ active }) {
   const t = useCycleClock({ cycle: BOARD_CYCLE, active });
   const at = Math.max(
     0,
-    Math.min(COLUMNS.length - 1, Math.floor((t - MOVE_START) / MOVE_EVERY))
+    Math.min(STAGES.length - 1, Math.floor((t - MOVE_START) / MOVE_EVERY))
   );
-  const grow = easeOut(phase(t, 300, 2600));
 
   return (
     <Frame title="Suivi des prospects" badge="Démonstration">
-      <div className="grid grid-cols-4 gap-2">
-        {COLUMNS.map((col, i) => (
-          <div key={col.name} className="min-w-0">
-            <div className="flex items-baseline justify-between mb-2 gap-1">
-              <span className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-fg-subtle truncate">
-                {col.name}
-              </span>
-              <span className="font-mono text-[10px] text-fg tabular-nums shrink-0">
-                {Math.round(col.count * grow)}
-              </span>
-            </div>
-
-            <div className="space-y-1.5">
-              {/* The travelling card: one prospect advancing stage by stage,
-                  which is the thing a pipeline is for. */}
-              {i === at && (
-                <div
-                  className="wt-row-in rounded-lg px-2 py-1.5 border text-[10px] font-medium
-                    text-fg bg-accent-soft border-accent"
-                >
-                  <span className="block truncate">{RESULTS[0].name}</span>
-                </div>
-              )}
-              {Array.from({ length: i === at ? 1 : 2 }).map((_, k) => (
-                <div
-                  key={k}
-                  className="rounded-lg px-2 py-1.5 border border-line bg-surface-2"
-                  style={{ opacity: grow }}
-                >
-                  <span className="block h-1.5 rounded-full bg-fg-subtle/25" />
-                </div>
-              ))}
-            </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[14px] font-semibold text-fg truncate">
+            {RESULTS[0].name}
           </div>
-        ))}
+          <div className="text-[11px] text-fg-subtle mt-0.5">
+            Plombier · {RESULTS[0].area}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-[11px] text-fg tabular-nums">★ 4,6</div>
+          <div className="text-[10px] text-fg-subtle">87 avis</div>
+        </div>
       </div>
 
       <div className="h-px bg-line my-4" />
 
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-fg-muted">
-          {COLUMNS[at].name === 'Gagné'
-            ? 'Affaire signée'
-            : `Étape actuelle · ${COLUMNS[at].name}`}
-        </span>
-        <span className="font-mono text-[11px] text-fg-subtle tabular-nums">
-          {COLUMNS.reduce((n, c) => n + c.count, 0)} prospects
-        </span>
+      {/* Pipeline strip: the stage the record sits at right now. */}
+      <div className="flex items-start">
+        {STAGES.map((label, i) => {
+          const done = i < at;
+          const here = i === at;
+          return (
+            <div key={label} className="flex-1 min-w-0">
+              <div className="flex items-center">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${here ? 'wt-pulse' : ''}`}
+                  style={{
+                    background: done || here ? 'var(--wt-brand-500)' : 'var(--wt-line)'
+                  }}
+                />
+                {i < STAGES.length - 1 && (
+                  <span
+                    className="flex-1 h-px transition-colors duration-500"
+                    style={{ background: done ? 'var(--wt-brand-500)' : 'var(--wt-line)' }}
+                  />
+                )}
+              </div>
+              <span
+                className={`block mt-2 text-[9.5px] leading-tight pr-1 transition-colors duration-300 ${
+                  here ? 'text-fg font-semibold' : done ? 'text-fg-muted' : 'text-fg-subtle'
+                }`}
+              >
+                {label}
+              </span>
+            </div>
+          );
+        })}
       </div>
+
+      <div className="h-px bg-line my-4" />
+
+      <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-2.5">
+        Historique
+      </div>
+
+      <ul className="space-y-1.5">
+        {HISTORY.map((h, i) => {
+          if (i > at) return <li key={h.label} className="h-8" />;
+          return (
+            <li
+              key={h.label}
+              className="wt-row-in h-8 px-2.5 flex items-center gap-2.5 rounded-lg
+                bg-surface-2 border border-line"
+            >
+              <h.icon className="w-3 h-3 text-accent shrink-0" />
+              <span className="flex-1 min-w-0 truncate text-[11px] text-fg-muted">
+                {h.label}
+              </span>
+              <span className="shrink-0 font-mono text-[9.5px] text-fg-subtle">{h.when}</span>
+            </li>
+          );
+        })}
+      </ul>
     </Frame>
   );
 }
