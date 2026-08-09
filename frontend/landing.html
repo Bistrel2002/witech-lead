@@ -11,15 +11,26 @@
     <title>Wi'Tech Lead | Le CRM de prospection B2B</title>
     <script>
       // Runs before first paint: apply the stored theme so a dark-mode user
-      // never sees a white flash. Duplicated verbatim from index.html on
-      // purpose, rather than loaded from a shared file — a separate script
-      // would only run after first paint and defeat the guard entirely.
+      // never sees a white flash. Kept inline and tiny on purpose — a
+      // separate file would load too late to help.
+      // Mirrors readInitialTheme() in src/hooks/useTheme.js on purpose: same
+      // order of checks (stored value, then system preference, then light)
+      // and the same accepted values ('light' / 'dark' only), so this guard
+      // and the hook's first render always agree — otherwise the hook would
+      // flip the page to the other theme right after mount.
       (function () {
+        var t;
         try {
-          var t = localStorage.getItem('witech_theme');
-          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        } catch (e) { /* private mode */ }
+          var stored = localStorage.getItem('witech_theme');
+          if (stored === 'light' || stored === 'dark') t = stored;
+        } catch (e) { /* private mode: fall through to system preference */ }
+        if (t === undefined) {
+          t = (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches)
+            ? 'dark'
+            : 'light';
+        }
+        if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        // Enable transitions only after the initial theme is settled.
         requestAnimationFrame(function () {
           document.documentElement.classList.add('wt-theme-ready');
         });
