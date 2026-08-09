@@ -1,0 +1,136 @@
+/* Design tokens for Witech Lead.
+ *
+ * Every visual value lives here as a custom property. Components never
+ * hard-code a colour: they read a token, which is what makes the second
+ * theme a second set of values rather than a second design.
+ *
+ * Palette derived from the Wi'Tech logo: magenta -> violet gradient on a
+ * deep near-black. Magenta is reserved for action; it must never be used
+ * to decorate data.
+ */
+
+:root {
+  /* Brand — identical in both themes, this is the logo */
+  --wt-brand-500: #c026d3;
+  --wt-brand-600: #a21caf;
+  --wt-brand-700: #9333ea;
+  --wt-brand-300: #e879f9;
+  --wt-brand-100: #f5d0fe;
+  --wt-gradient: linear-gradient(135deg, #c026d3 0%, #9333ea 100%);
+
+  /* Semantic — same meaning in both themes */
+  --wt-success: #16a34a;
+  --wt-success-soft: #dcfce7;
+  --wt-danger: #dc2626;
+  --wt-danger-soft: #fee2e2;
+  --wt-warning: #d97706;
+  --wt-warning-soft: #fef3c7;
+
+  /* Typography */
+  --wt-font-display: 'Outfit', system-ui, sans-serif;
+  --wt-font-body: 'Inter', system-ui, sans-serif;
+
+  /* Spacing scale */
+  --wt-space-1: 0.25rem;
+  --wt-space-2: 0.5rem;
+  --wt-space-3: 0.75rem;
+  --wt-space-4: 1rem;
+  --wt-space-6: 1.5rem;
+  --wt-space-8: 2rem;
+  --wt-space-12: 3rem;
+
+  /* Radii */
+  --wt-radius-sm: 0.5rem;
+  --wt-radius: 0.75rem;
+  --wt-radius-lg: 1rem;
+  --wt-radius-xl: 1.25rem;
+
+  /* Light theme surfaces and text — the default */
+  --wt-bg: #f7f6fa;
+  --wt-surface: #ffffff;
+  --wt-surface-2: #faf9fc;
+  --wt-line: #e6e1ee;
+  --wt-fg: #1a1626;
+  --wt-fg-muted: #6b6480;
+  --wt-fg-subtle: #9a93ab;
+  --wt-accent: var(--wt-brand-600);
+  --wt-accent-fg: #ffffff;
+  --wt-accent-soft: #fae8ff;
+  --wt-shadow: 0 1px 2px rgba(26, 22, 38, .06), 0 1px 3px rgba(26, 22, 38, .04);
+  --wt-shadow-lg: 0 10px 30px rgba(26, 22, 38, .10);
+
+  /* The navigation rail is dark in both themes — it carries the brand */
+  --wt-rail-bg: #140f1e;
+  --wt-rail-fg: #cfc6dd;
+  --wt-rail-fg-active: #ffffff;
+  --wt-rail-line: #2a2038;
+}
+
+:root[data-theme='dark'] {
+  --wt-bg: #0d0a14;
+  --wt-surface: #17111f;
+  --wt-surface-2: #1e1729;
+  --wt-line: #2d2440;
+  --wt-fg: #f2ecfa;
+  --wt-fg-muted: #a99fbd;
+  --wt-fg-subtle: #7d7391;
+  --wt-accent: var(--wt-brand-300);
+  --wt-accent-fg: #1a0620;
+  --wt-accent-soft: #2b1436;
+  --wt-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+  --wt-shadow-lg: 0 12px 34px rgba(0, 0, 0, .55);
+
+  --wt-rail-bg: #120d1a;
+  --wt-rail-fg: #b9aecb;
+  --wt-rail-fg-active: #ffffff;
+  --wt-rail-line: #251c33;
+
+  --wt-success-soft: #082f1a;
+  --wt-danger-soft: #3b0d0d;
+  --wt-warning-soft: #3a2606;
+}
+
+/* Expose the tokens to Tailwind so `bg-surface`, `text-fg-muted`,
+ * `border-line` etc. exist as utilities and theme themselves. */
+@theme inline {
+  --color-bg: var(--wt-bg);
+  --color-surface: var(--wt-surface);
+  --color-surface-2: var(--wt-surface-2);
+  --color-line: var(--wt-line);
+  --color-fg: var(--wt-fg);
+  --color-fg-muted: var(--wt-fg-muted);
+  --color-fg-subtle: var(--wt-fg-subtle);
+  --color-accent: var(--wt-accent);
+  --color-accent-fg: var(--wt-accent-fg);
+  --color-accent-soft: var(--wt-accent-soft);
+  --color-brand-300: var(--wt-brand-300);
+  --color-brand-500: var(--wt-brand-500);
+  --color-brand-600: var(--wt-brand-600);
+  --color-brand-700: var(--wt-brand-700);
+  --color-success: var(--wt-success);
+  --color-danger: var(--wt-danger);
+  --color-warning: var(--wt-warning);
+  --color-rail: var(--wt-rail-bg);
+  --font-display: var(--wt-font-display);
+  --font-body: var(--wt-font-body);
+  --radius-wt: var(--wt-radius);
+  --radius-wt-lg: var(--wt-radius-lg);
+}
+
+html {
+  background: var(--wt-bg);
+  color: var(--wt-fg);
+  font-family: var(--wt-font-body);
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* The theme swap should feel deliberate, not jarring — but never animate
+ * on first paint, which would flash the wrong theme. */
+html.wt-theme-ready body,
+html.wt-theme-ready body * {
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease;
+}
