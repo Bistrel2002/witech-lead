@@ -12,6 +12,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
     <title>Witech Lead | Smart Prospecting Suite</title>
+
+    <script>
+      // Runs before first paint: apply the stored theme so a dark-mode user
+      // never sees a white flash. Kept inline and tiny on purpose — a
+      // separate file would load too late to help.
+      (function () {
+        try {
+          var t = localStorage.getItem('witech_theme');
+          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        } catch (e) { /* private mode: fall through to light */ }
+        // Enable transitions only after the initial theme is settled.
+        requestAnimationFrame(function () {
+          document.documentElement.classList.add('wt-theme-ready');
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
