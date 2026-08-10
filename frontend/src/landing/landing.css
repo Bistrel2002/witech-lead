@@ -168,6 +168,20 @@
   animation: wt-pulse 1.6s ease-in-out infinite;
 }
 
+/* ── Product tour ─────────────────────────────────────────────────────── */
+
+/* Screen change inside the tour window. Short and small on purpose: the
+ * window frame stays put and only its contents cross-fade, which is what
+ * sells it as one application switching views rather than four cards. */
+@keyframes wt-screen-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.wt-screen-in {
+  animation: wt-screen-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* ── Featured plan ────────────────────────────────────────────────────── */
 
 /* Same masked-ring technique as the console, at full brand strength, plus a
@@ -234,7 +248,8 @@
  * than running the timeline, so the page still demonstrates the product. */
 @media (prefers-reduced-motion: reduce) {
   .wt-rise,
-  .wt-row-in {
+  .wt-row-in,
+  .wt-screen-in {
     animation: none;
     opacity: 1;
     transform: none;

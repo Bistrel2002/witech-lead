@@ -3,12 +3,7 @@ import { Button, ThemeToggle } from '../components/ui';
 import Pricing from './Pricing.jsx';
 import ProspectConsole from './ProspectConsole.jsx';
 import Reveal from './Reveal.jsx';
-import {
-  CampaignPanel,
-  SendingPanel,
-  PipelinePanel,
-  DashboardPanel
-} from './FeaturePanels.jsx';
+import ProductTour from './ProductTour.jsx';
 import { useReveal } from './useReveal.js';
 import './landing.css';
 
@@ -51,75 +46,6 @@ const SPEC = [
   ['Envoi', 'Sous-domaine d’expédition dédié à votre compte'],
   ['Conformité', 'Lien de désinscription dans chaque message']
 ];
-
-/* One section per screen the customer actually works in. Full-width blocks
- * at the hero console's scale, not thumbnails — a product demo the reader
- * cannot read is decoration. */
-const FEATURES = [
-  {
-    id: 'campagne',
-    eyebrow: 'Création de campagne',
-    title: 'Un modèle, écrit une fois',
-    body: 'Vous choisissez une catégorie et une ville, vous rédigez un message, et vous y placez des variables. Chaque entreprise reçoit sa propre version — vous relisez au lieu d’écrire deux cents fois.',
-    note: 'Le lien de désinscription est ajouté à chaque message, que vous pensiez à la variable ou non.',
-    Panel: CampaignPanel
-  },
-  {
-    id: 'envoi',
-    eyebrow: 'Envoi',
-    title: 'Vous lancez, le produit espace',
-    body: 'Les messages partent depuis un sous-domaine réservé à votre compte, étalés dans le temps pour protéger votre réputation d’expéditeur. Vous suivez la progression en direct.',
-    note: 'Les adresses désinscrites sont ignorées automatiquement, jamais recontactées.',
-    Panel: SendingPanel,
-    flip: true
-  },
-  {
-    id: 'suivi',
-    eyebrow: 'Suivi des prospects',
-    title: 'Chaque prospect avance, et vous le voyez',
-    body: 'Un statut par prospect, du premier contact à l’affaire signée. Vous ouvrez la liste et vous savez qui relancer aujourd’hui, sans tenir de tableur à côté.',
-    note: 'C’est ce qui en fait un CRM et non un simple outil d’envoi.',
-    Panel: PipelinePanel
-  },
-  {
-    id: 'tableau-de-bord',
-    eyebrow: 'Tableau de bord',
-    title: 'Vos chiffres, sans les compter',
-    body: 'La répartition de vos prospects par statut et le volume par métier, tenus à jour à mesure que vos campagnes tournent. Vous voyez d’un coup d’œil ce qui remplit votre pipeline et ce qui reste à traiter.',
-    note: 'Les chiffres affichés ici sont un exemple : le tableau de bord se remplit avec vos propres données.',
-    Panel: DashboardPanel,
-    flip: true
-  }
-];
-
-function FeatureSection({ feature }) {
-  const { ref, shown } = useReveal({ threshold: 0.15 });
-  const { eyebrow, title, body, note, Panel, flip } = feature;
-
-  return (
-    <div ref={ref} className="grid lg:grid-cols-2 gap-10 lg:gap-14 items-center">
-      <div className={flip ? 'lg:order-2' : undefined}>
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
-          {eyebrow}
-        </span>
-        <h3 className="font-display font-extrabold text-2xl lg:text-3xl text-fg tracking-[-0.02em] mt-3 mb-4">
-          {title}
-        </h3>
-        <p className="text-fg-muted leading-relaxed">{body}</p>
-        <p className="text-fg-subtle text-sm leading-relaxed mt-4 pl-4 border-l-2 border-line">
-          {note}
-        </p>
-      </div>
-      <div
-        className="wt-reveal"
-        data-shown={shown ? 'true' : 'false'}
-        style={{ '--wt-delay': '80ms' }}
-      >
-        <Panel active={shown} />
-      </div>
-    </div>
-  );
-}
 
 function Pipeline() {
   const { ref, shown } = useReveal({ threshold: 0.25 });
@@ -265,11 +191,22 @@ export default function Landing() {
           <Pipeline />
         </section>
 
-        {/* ── The three screens, at full scale ──────────────────────── */}
-        <section className="max-w-6xl mx-auto px-6 pb-4 space-y-20 lg:space-y-28">
-          {FEATURES.map((f) => (
-            <FeatureSection key={f.id} feature={f} />
-          ))}
+        {/* ── The product, in one window ────────────────────────────── */}
+        <section className="max-w-6xl mx-auto px-6 pb-20 lg:pb-24">
+          <Reveal className="text-center max-w-2xl mx-auto mb-12">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+              Le produit
+            </span>
+            <h2 className="font-display font-extrabold text-3xl lg:text-4xl text-fg tracking-[-0.02em] mt-4">
+              Quatre écrans, un seul outil
+            </h2>
+            <p className="text-fg-muted mt-4 leading-relaxed">
+              Tout se passe au même endroit — la campagne, l’envoi, le suivi et les
+              chiffres. Parcourez-les, ou laissez défiler.
+            </p>
+          </Reveal>
+
+          <ProductTour />
         </section>
 
         {/* ── The differentiator ────────────────────────────────────── */}

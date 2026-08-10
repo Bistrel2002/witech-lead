@@ -2,9 +2,12 @@ import { Check, SkipForward, Search, Mail, Phone, FileText } from 'lucide-react'
 import { useCycleClock, easeOut, phase } from './useCycleClock.js';
 import { RESULTS } from './consoleTimeline.js';
 
-/* Full-size demonstrations of the three screens a customer spends their
- * time in, built to the same treatment as the hero console rather than as
- * thumbnails: the point of showing a product is that the reader can read it.
+/* The screen bodies rendered inside ProductTour's window.
+ *
+ * They deliberately carry no chrome of their own — no frame, no header, no
+ * "Démonstration" badge. The tour owns all of that, because the whole point
+ * of the arrangement is that these read as four screens of one application
+ * rather than four separate cards.
  *
  * Everything shown is taken from the app, not invented:
  *   - the campaign form's own fields and the {{company_name}} /
@@ -16,28 +19,6 @@ import { RESULTS } from './consoleTimeline.js';
  * carries a "Démonstration" label; the surrounding prose makes the actual
  * claims. Panels only run once scrolled into view.
  */
-
-function Frame({ title, badge, children }) {
-  return (
-    <div className="wt-console-frame shadow-[var(--wt-shadow-lg)]" aria-hidden="true">
-      <div className="p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 min-w-0">
-            <span
-              className="wt-pulse w-1.5 h-1.5 rounded-full shrink-0"
-              style={{ background: 'var(--wt-brand-500)' }}
-            />
-            <span className="text-[11px] font-semibold text-fg-muted truncate">{title}</span>
-          </div>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-subtle shrink-0 ml-3">
-            {badge}
-          </span>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function FieldBox({ label, children, className = '' }) {
   return (
@@ -81,7 +62,7 @@ export function CampaignPanel({ active }) {
   const company = resolved ? RESULTS[Math.max(0, slot) % RESULTS.length] : null;
 
   return (
-    <Frame title="Nouvelle campagne" badge="Démonstration">
+    <>
       <div className="grid grid-cols-2 gap-3">
         <FieldBox label="Nom de la campagne">
           <span>{typedName}</span>
@@ -134,7 +115,7 @@ export function CampaignPanel({ active }) {
         <Tag>{'{{company_name}}'}</Tag>
         <Tag>{'{{unsubscribe_link}}'}</Tag>
       </div>
-    </Frame>
+    </>
   );
 }
 
@@ -177,7 +158,7 @@ export function SendingPanel({ active }) {
   ];
 
   return (
-    <Frame title="Plombiers Lyon — Mars" badge="Démonstration">
+    <>
       <div className="flex items-baseline justify-between mb-2">
         <span className="text-[12px] font-semibold text-fg">
           {done ? 'Campagne terminée' : 'Envoi en cours…'}
@@ -237,7 +218,7 @@ export function SendingPanel({ active }) {
       <p className="text-[10px] text-fg-subtle mt-3">
         « Ignoré » : adresse désinscrite ou en liste de suppression.
       </p>
-    </Frame>
+    </>
   );
 }
 
@@ -272,7 +253,7 @@ export function PipelinePanel({ active }) {
   );
 
   return (
-    <Frame title="Suivi des prospects" badge="Démonstration">
+    <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[14px] font-semibold text-fg truncate">
@@ -347,7 +328,7 @@ export function PipelinePanel({ active }) {
           );
         })}
       </ul>
-    </Frame>
+    </>
   );
 }
 
@@ -401,80 +382,88 @@ export function DashboardPanel({ active }) {
   }));
 
   return (
-    <Frame title="Tableau de bord" badge="Démonstration">
-      <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
-        Prospects par catégorie
-      </div>
+    <>
+      {/* Two columns on a wide canvas. Stacked, the histogram stretched to
+          900px while staying 64px tall and the donut left a third of the
+          window empty — these bodies now live in the tour's screen area, not
+          in a narrow card. */}
+      <div className="grid lg:grid-cols-[1.5fr_1fr] gap-6 lg:gap-8">
 
-      <div className="flex items-end justify-between gap-2 h-24">
-        {BARS.map((b, i) => {
-          const p = easeOut(phase(t, 300 + i * 140, 1800 + i * 140));
-          return (
-            <div key={b.name} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <span className="font-mono text-[10px] text-fg tabular-nums">
-                {Math.round(b.count * p)}
-              </span>
-              <div
-                className="w-full rounded-t-md"
-                style={{
-                  height: `${(b.count / BAR_MAX) * p * 64}px`,
-                  backgroundImage: 'var(--wt-gradient)'
-                }}
-              />
-              <span className="text-[9px] text-fg-subtle truncate w-full text-center">
-                {b.short}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="h-px bg-line my-4" />
-
-      <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
-        Répartition par statut
-      </div>
-
-      <div className="flex items-center gap-5">
-        <div className="relative shrink-0">
-          <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
-            <circle
-              cx="38" cy="38" r={R} fill="none"
-              stroke="var(--wt-surface-2)" strokeWidth="9"
-            />
-            {arcs.map((a) => (
-              <circle
-                key={a.name}
-                cx="38" cy="38" r={R} fill="none"
-                stroke={a.color} strokeWidth="9"
-                strokeDasharray={`${a.len} ${CIRC - a.len}`}
-                strokeDashoffset={-a.offset}
-              />
-            ))}
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="font-mono text-[14px] font-semibold text-fg tabular-nums leading-none">
-              {Math.round(SPLIT_TOTAL * ring)}
-            </span>
-            <span className="text-[8px] text-fg-subtle mt-0.5">prospects</span>
+        <div>
+          <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
+            Prospects par catégorie
+          </div>
+          <div className="flex items-end justify-between gap-3 h-32">
+            {BARS.map((b, i) => {
+              const p = easeOut(phase(t, 300 + i * 140, 1800 + i * 140));
+              return (
+                <div key={b.name} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                  <span className="font-mono text-[10px] text-fg tabular-nums">
+                    {Math.round(b.count * p)}
+                  </span>
+                  <div
+                    className="w-full max-w-[64px] rounded-t-md"
+                    style={{
+                      height: `${(b.count / BAR_MAX) * p * 92}px`,
+                      backgroundImage: 'var(--wt-gradient)'
+                    }}
+                  />
+                  <span className="text-[9px] text-fg-subtle truncate w-full text-center">
+                    {b.short}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        <ul className="flex-1 space-y-1.5 min-w-0">
-          {SPLIT.map((s) => (
-            <li key={s.name} className="flex items-center gap-2">
-              <span
-                className="w-2 h-2 rounded-sm shrink-0"
-                style={{ background: s.color }}
-              />
-              <span className="text-[11px] text-fg-muted flex-1 truncate">{s.name}</span>
-              <span className="font-mono text-[11px] text-fg tabular-nums">
-                {Math.round(s.value * ring)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="lg:border-l lg:border-line lg:pl-8">
+          <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
+            Répartition par statut
+          </div>
+          <div className="flex items-center gap-5">
+            <div className="relative shrink-0">
+              <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
+                <circle
+                  cx="38" cy="38" r={R} fill="none"
+                  stroke="var(--wt-surface-2)" strokeWidth="9"
+                />
+                {arcs.map((a) => (
+                  <circle
+                    key={a.name}
+                    cx="38" cy="38" r={R} fill="none"
+                    stroke={a.color} strokeWidth="9"
+                    strokeDasharray={`${a.len} ${CIRC - a.len}`}
+                    strokeDashoffset={-a.offset}
+                  />
+                ))}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-mono text-[14px] font-semibold text-fg tabular-nums leading-none">
+                  {Math.round(SPLIT_TOTAL * ring)}
+                </span>
+                <span className="text-[8px] text-fg-subtle mt-0.5">prospects</span>
+              </div>
+            </div>
+
+            <ul className="flex-1 space-y-1.5 min-w-0">
+              {SPLIT.map((s) => (
+                <li key={s.name} className="flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-sm shrink-0"
+                    style={{ background: s.color }}
+                  />
+                  <span className="text-[11px] text-fg-muted flex-1 truncate">{s.name}</span>
+                  <span className="font-mono text-[11px] text-fg tabular-nums">
+                    {Math.round(s.value * ring)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
       </div>
-    </Frame>
+    </>
   );
 }
