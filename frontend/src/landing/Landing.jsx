@@ -7,7 +7,7 @@ import ProductShowcase from './ProductShowcase.jsx';
 import { useReveal } from './useReveal.js';
 import './landing.css';
 
-const APP_URL = '/';
+const APP_URL = '/app.html';
 const CONTACT = 'mailto:contact@witechagency.com?subject=Demande%20d%27information%20Wi%27Tech%20Lead';
 
 /* Numbered because this genuinely is a sequence: a prospect cannot be

@@ -14,10 +14,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        // index stays the app: OAuth redirects point at the site root and
-        // moving the app off it would break Google sign-in.
-        main: path.resolve(here, 'index.html'),
-        landing: path.resolve(here, 'landing.html')
+        // The vitrine is the site root: a visitor typing the domain must
+        // land on the product presentation, not on a login form. The app
+        // moves to /app.html — see Login.jsx, which sends its own path as
+        // the OAuth redirect_uri so sign-in returns to the app rather than
+        // to the marketing page.
+        landing: path.resolve(here, 'index.html'),
+        app: path.resolve(here, 'app.html')
       }
     }
   },

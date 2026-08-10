@@ -44,7 +44,14 @@ export default function Login({ apiHost, onLoginSuccess }) {
       setError("La connexion avec Apple sera disponible dans la prochaine version.");
       return;
     }
-    const redirectUri = encodeURIComponent(window.location.origin);
+    // origin + pathname, not origin alone: the app lives at /app.html and
+    // the root now serves the vitrine, so sending the bare origin would
+    // drop the user on the marketing page after a successful sign-in.
+    // Using the current pathname keeps this correct wherever the app is
+    // mounted, without hard-coding the filename.
+    const redirectUri = encodeURIComponent(
+      window.location.origin + window.location.pathname
+    );
     window.location.href = `${apiHost}/api/auth/${provider}?redirect_uri=${redirectUri}`;
   };
 
