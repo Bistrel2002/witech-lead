@@ -1,4 +1,4 @@
-import { Check, SkipForward, Search, Mail, Phone, FileText } from 'lucide-react';
+import { Check, SkipForward, Search, Mail, Phone, FileText, Globe, Sparkles } from 'lucide-react';
 import { useCycleClock, easeOut, phase } from './useCycleClock.js';
 import { RESULTS } from './consoleTimeline.js';
 
@@ -345,6 +345,17 @@ export function PipelinePanel({ active }) {
 
 const DASH_CYCLE = 7600;
 
+/* Dashboard.jsx keeps a recent-activity feed beside its two charts, with
+ * exactly these four kinds of entry. Including it fills the cell honestly
+ * rather than padding it, and it is the part that shows the dashboard is
+ * live rather than a static report. */
+const ACTIVITY = [
+  { icon: Search, text: 'Nouveau prospect importé — Plomberie du Rhône', when: 'il y a 10 min' },
+  { icon: Globe, text: 'Scraping réussi pour Dubois & Fils', when: 'il y a 2 h' },
+  { icon: Mail, text: 'E-mail envoyé à AquaService', when: 'il y a 5 h' },
+  { icon: Sparkles, text: 'Statut mis à jour — Sanitaire Presqu’île', when: 'hier' }
+];
+
 const BARS = [
   { name: 'Restaurants', short: 'Rest.', count: 20 },
   { name: 'Coiffeurs', short: 'Coif.', count: 15 },
@@ -362,7 +373,7 @@ const SPLIT = [
 ];
 const SPLIT_TOTAL = SPLIT.reduce((n, s) => n + s.value, 0);
 
-const R = 30;
+const R = 38;
 const CIRC = 2 * Math.PI * R;
 
 export function DashboardPanel({ active }) {
@@ -372,6 +383,13 @@ export function DashboardPanel({ active }) {
   // Arc offsets precomputed rather than accumulated inside the JSX: a
   // variable reassigned while rendering is a mutation React is entitled to
   // run twice, and the lint rule that catches it is right to.
+  /* Each slice is rounded once, and the centre shows the sum of exactly
+   * those rounded numbers. Rounding the total independently let the centre
+   * read 32 while the legend added up to 31 — the panel contradicting
+   * itself in the space of two centimetres. */
+  const shownValues = SPLIT.map((s) => Math.round(s.value * ring));
+  const shownTotal = shownValues.reduce((n, v) => n + v, 0);
+
   const arcs = SPLIT.map((s, i) => ({
     ...s,
     len: (s.value / SPLIT_TOTAL) * CIRC * ring,
@@ -393,7 +411,7 @@ export function DashboardPanel({ active }) {
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
             Prospects par catégorie
           </div>
-          <div className="flex items-end justify-between gap-3 h-32">
+          <div className="flex items-end justify-between gap-3 h-44">
             {BARS.map((b, i) => {
               const p = easeOut(phase(t, 300 + i * 140, 1800 + i * 140));
               return (
@@ -404,7 +422,7 @@ export function DashboardPanel({ active }) {
                   <div
                     className="w-full max-w-[64px] rounded-t-md"
                     style={{
-                      height: `${(b.count / BAR_MAX) * p * 92}px`,
+                      height: `${(b.count / BAR_MAX) * p * 132}px`,
                       backgroundImage: 'var(--wt-gradient)'
                     }}
                   />
@@ -421,41 +439,41 @@ export function DashboardPanel({ active }) {
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-3">
             Répartition par statut
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-5 pt-1">
             <div className="relative shrink-0">
-              <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
+              <svg width="94" height="94" viewBox="0 0 94 94" className="-rotate-90">
                 <circle
-                  cx="38" cy="38" r={R} fill="none"
-                  stroke="var(--wt-surface-2)" strokeWidth="9"
+                  cx="47" cy="47" r={R} fill="none"
+                  stroke="var(--wt-surface-2)" strokeWidth="11"
                 />
                 {arcs.map((a) => (
                   <circle
                     key={a.name}
-                    cx="38" cy="38" r={R} fill="none"
-                    stroke={a.color} strokeWidth="9"
+                    cx="47" cy="47" r={R} fill="none"
+                    stroke={a.color} strokeWidth="11"
                     strokeDasharray={`${a.len} ${CIRC - a.len}`}
                     strokeDashoffset={-a.offset}
                   />
                 ))}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-mono text-[14px] font-semibold text-fg tabular-nums leading-none">
-                  {Math.round(SPLIT_TOTAL * ring)}
+                <span className="font-mono text-[16px] font-semibold text-fg tabular-nums leading-none">
+                  {shownTotal}
                 </span>
-                <span className="text-[8px] text-fg-subtle mt-0.5">prospects</span>
+                <span className="text-[8.5px] text-fg-subtle mt-0.5">prospects</span>
               </div>
             </div>
 
             <ul className="flex-1 space-y-1.5 min-w-0">
-              {SPLIT.map((s) => (
+              {SPLIT.map((s, i) => (
                 <li key={s.name} className="flex items-center gap-2">
                   <span
                     className="w-2 h-2 rounded-sm shrink-0"
                     style={{ background: s.color }}
                   />
-                  <span className="text-[11px] text-fg-muted flex-1 truncate">{s.name}</span>
-                  <span className="font-mono text-[11px] text-fg tabular-nums">
-                    {Math.round(s.value * ring)}
+                  <span className="text-[11.5px] text-fg-muted flex-1 truncate">{s.name}</span>
+                  <span className="font-mono text-[11.5px] text-fg tabular-nums">
+                    {shownValues[i]}
                   </span>
                 </li>
               ))}
@@ -464,6 +482,28 @@ export function DashboardPanel({ active }) {
         </div>
 
       </div>
+
+      <div className="h-px bg-line my-5" />
+
+      <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-fg-subtle mb-2.5">
+        Activité récente
+      </div>
+      <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5">
+        {ACTIVITY.map((a, i) => {
+          const p = phase(t, 1200 + i * 260, 1700 + i * 260);
+          return (
+            <li
+              key={a.text}
+              className="flex items-center gap-2.5 h-7"
+              style={{ opacity: p }}
+            >
+              <a.icon className="w-3 h-3 text-accent shrink-0" />
+              <span className="flex-1 min-w-0 truncate text-[11px] text-fg-muted">{a.text}</span>
+              <span className="shrink-0 font-mono text-[9.5px] text-fg-subtle">{a.when}</span>
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }

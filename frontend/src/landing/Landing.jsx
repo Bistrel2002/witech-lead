@@ -3,7 +3,7 @@ import { Button, ThemeToggle } from '../components/ui';
 import Pricing from './Pricing.jsx';
 import ProspectConsole from './ProspectConsole.jsx';
 import Reveal from './Reveal.jsx';
-import ProductTour from './ProductTour.jsx';
+import ProductShowcase from './ProductShowcase.jsx';
 import { useReveal } from './useReveal.js';
 import './landing.css';
 
@@ -201,12 +201,12 @@ export default function Landing() {
               Quatre écrans, un seul outil
             </h2>
             <p className="text-fg-muted mt-4 leading-relaxed">
-              Tout se passe au même endroit — la campagne, l’envoi, le suivi et les
-              chiffres. Parcourez-les, ou laissez défiler.
+              La campagne, l’envoi, le suivi des prospects et les chiffres — tout au
+              même endroit, et tout sous vos yeux.
             </p>
           </Reveal>
 
-          <ProductTour />
+          <ProductShowcase />
         </section>
 
         {/* ── The differentiator ────────────────────────────────────── */}
