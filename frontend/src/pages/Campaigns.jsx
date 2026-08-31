@@ -533,35 +533,35 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
     <div className="space-y-6">
       {/* Page Header */}
       <div>
-        <h2 className="text-2xl font-heading font-extrabold text-slate-800">Campagnes d'Outreach</h2>
-        <p className="text-slate-500 text-sm mt-1">
+        <h2 className="text-2xl font-display font-extrabold text-fg">Campagnes d'Outreach</h2>
+        <p className="text-fg-muted text-sm mt-1">
           Configurez vos modèles et lancez des campagnes automatisées par e-mail. Le canal SMS arrive bientôt.
         </p>
       </div>
 
       {/* Mini Tabs */}
-      <div className="flex gap-1 bg-slate-200/60 p-1 rounded-xl border border-slate-200/80 max-w-2xl">
+      <div className="flex gap-1 bg-line/60 p-1 rounded-xl border border-line/80 max-w-2xl">
         <button 
-          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'templates' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'templates' ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}
           onClick={() => setActiveTab('templates')}
         >
           Modèles de Prospection
         </button>
         <button 
-          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'new-campaign' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'new-campaign' ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}
           onClick={() => setActiveTab('new-campaign')}
         >
           Créateur de Campagne
         </button>
         <button 
-          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'history' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'history' ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}
           onClick={() => setActiveTab('history')}
         >
           Historique & Rapports
         </button>
         {selectedCampaignDetails && (
           <button 
-            className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'active-monitor' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all duration-150 ${activeTab === 'active-monitor' ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}
             onClick={() => setActiveTab('active-monitor')}
           >
             Suivi : {selectedCampaignDetails.campaign.name}
@@ -573,10 +573,10 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       {activeTab === 'templates' && (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
-            <h3 className="font-heading font-extrabold text-slate-800 text-lg">Modèles Disponibles</h3>
+            <h3 className="font-display font-extrabold text-fg text-lg">Modèles Disponibles</h3>
             {!showTemplateForm && (
               <button 
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150" 
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs shadow-sm hover:bg-accent active:scale-95 transition-all duration-150" 
                 onClick={() => { setShowTemplateForm(true); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '' }); }}
               >
                 <Plus className="w-4 h-4" />
@@ -586,27 +586,27 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
           </div>
 
           {showTemplateForm && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-              <h4 className="font-heading font-extrabold text-slate-800 text-base">{editingTemplate ? 'Modifier le modèle' : 'Créer un nouveau modèle'}</h4>
+            <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+              <h4 className="font-display font-extrabold text-fg text-base">{editingTemplate ? 'Modifier le modèle' : 'Créer un nouveau modèle'}</h4>
               <form onSubmit={handleTemplateSubmit} className="space-y-4 mt-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom du Modèle *</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Nom du Modèle *</label>
                   <input 
-                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                    type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                     value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
                     placeholder="Ex: Witech - Pitch n8n Artisans"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Objet (Email seulement)</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Objet (Email seulement)</label>
                   <input 
-                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                    type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     value={templateForm.subject} onChange={(e) => setTemplateForm({ ...templateForm, subject: e.target.value })}
                     placeholder="Ex: Optimisation de la visibilité en ligne de {{company_name}}"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Corps du Message *</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Corps du Message *</label>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {/*
                       unsubscribe_link belongs in this list: without it the
@@ -618,7 +618,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     {['company_name', 'website', 'phone', 'city', 'sender_name', 'sender_phone', 'sender_signature', 'unsubscribe_link'].map(tag => (
                       <span 
                         key={tag} 
-                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg px-2 py-1 text-2xs text-teal-700 font-mono cursor-pointer transition-colors"
+                        className="bg-surface-2 hover:bg-line border border-line rounded-lg px-2 py-1 text-2xs text-accent font-mono cursor-pointer transition-colors"
                         onClick={() => setTemplateForm({ ...templateForm, body: templateForm.body + ` {{${tag}}}` })}
                       >
                         +{tag}
@@ -626,14 +626,14 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     ))}
                   </div>
                   <textarea 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[160px] font-mono" required
+                    className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all min-h-[160px] font-mono" required
                     value={templateForm.body} onChange={(e) => setTemplateForm({ ...templateForm, body: e.target.value })}
                     placeholder="Saisissez votre message. Utilisez les tags ci-dessus pour insérer des variables dynamiques..."
                   />
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
-                  <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150" onClick={() => setShowTemplateForm(false)}>Annuler</button>
-                  <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150">Sauvegarder</button>
+                  <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2 active:scale-95 transition-all duration-150" onClick={() => setShowTemplateForm(false)}>Annuler</button>
+                  <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all duration-150">Sauvegarder</button>
                 </div>
               </form>
             </div>
@@ -641,28 +641,28 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {templates.map(tmpl => (
-              <div key={tmpl.id} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+              <div key={tmpl.id} className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
-                    <h4 className="font-heading font-extrabold text-slate-800 text-base">{tmpl.name}</h4>
+                  <div className="flex justify-between items-center pb-3 border-b border-line mb-4">
+                    <h4 className="font-display font-extrabold text-fg text-base">{tmpl.name}</h4>
                     <div className="flex gap-2">
-                      <button className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 transition-colors" onClick={() => handleEditTemplate(tmpl)}>
+                      <button className="p-1.5 text-fg-subtle hover:text-fg-muted rounded-lg hover:bg-surface-2 transition-colors" onClick={() => handleEditTemplate(tmpl)}>
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors" onClick={() => handleDeleteTemplate(tmpl.id)}>
+                      <button className="p-1.5 text-[var(--wt-danger)] hover:text-[var(--wt-danger)] rounded-lg hover:bg-[var(--wt-danger-soft)] transition-colors" onClick={() => handleDeleteTemplate(tmpl.id)}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                   {tmpl.subject && (
                     <div className="mb-3">
-                      <p className="text-2xs font-bold text-slate-400 uppercase tracking-wider mb-1">Sujet (Email) :</p>
-                      <p className="text-sm text-slate-700 font-semibold">{tmpl.subject}</p>
+                      <p className="text-2xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Sujet (Email) :</p>
+                      <p className="text-sm text-fg font-semibold">{tmpl.subject}</p>
                     </div>
                   )}
                   <div>
-                    <p className="text-2xs font-bold text-slate-400 uppercase tracking-wider mb-1">Message :</p>
-                    <p className="text-xs text-slate-500 whiteSpace-pre-wrap font-mono line-clamp-4 leading-relaxed">
+                    <p className="text-2xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Message :</p>
+                    <p className="text-xs text-fg-muted whiteSpace-pre-wrap font-mono line-clamp-4 leading-relaxed">
                       {tmpl.body}
                     </p>
                   </div>
@@ -676,24 +676,24 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       {/* TAB 2: NEW CAMPAIGN WIZARD */}
       {activeTab === 'new-campaign' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-5">Paramétrer la Campagne</h3>
+          <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-display font-extrabold text-fg text-lg mb-5">Paramétrer la Campagne</h3>
             <form onSubmit={handleCreateCampaign} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de la Campagne *</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Nom de la Campagne *</label>
                 <input 
-                  type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                   value={newCampaign.name} onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
                   placeholder="Ex: Campagne Plombiers Nantes SMS"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Canal de Prospection *</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Canal de Prospection *</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'email' ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all ${newCampaign.channel === 'email' ? 'bg-accent-soft border-accent text-accent shadow-sm' : 'bg-surface-2 border-line text-fg-muted hover:bg-surface-2/50'}`}
                     onClick={() => setNewCampaign({ ...newCampaign, channel: 'email', category: '' })}
                   >
                     <Mail className="w-5 h-5 mb-1.5" />
@@ -713,11 +713,11 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     disabled
                     aria-disabled="true"
                     title={SMS_COMING_SOON_HINT}
-                    className="flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed"
+                    className="flex flex-col items-center justify-center p-3 rounded-xl border font-semibold text-xs transition-all bg-surface-2 border-line text-fg-subtle opacity-60 cursor-not-allowed"
                   >
                     <Smartphone className="w-5 h-5 mb-1.5" />
                     SMS
-                    <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
                       Bientôt disponible
                     </span>
                   </button>
@@ -725,9 +725,9 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Modèle de Message *</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Modèle de Message *</label>
                 <select 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                   value={newCampaign.template_id} onChange={(e) => setNewCampaign({ ...newCampaign, template_id: e.target.value })}
                 >
                   <option value="">-- Sélectionnez un modèle --</option>
@@ -738,13 +738,13 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filtrer par Secteur / Métier (Issus de la base)</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Filtrer par Secteur / Métier (Issus de la base)</label>
                 
                 {/* Quick Sector Selector Buttons derived directly from DB leads */}
                 <div className="flex flex-wrap gap-2 mb-4">
                   <button
                     type="button"
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${!newCampaign.category ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${!newCampaign.category ? 'bg-accent-soft border-accent text-accent shadow-sm' : 'bg-surface-2 border-line text-fg-muted hover:bg-surface-2/50'}`}
                     onClick={() => setNewCampaign({ ...newCampaign, category: '' })}
                   >
                     Toutes les catégories ({leads.length} prospects)
@@ -759,7 +759,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       <button
                         key={cat}
                         type="button"
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isSelected ? 'bg-teal-50 border-teal-500 text-teal-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'}`}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isSelected ? 'bg-accent-soft border-accent text-accent shadow-sm' : 'bg-surface-2 border-line text-fg-muted hover:bg-surface-2/50'}`}
                         onClick={() => setNewCampaign({ ...newCampaign, category: isSelected ? '' : cat })}
                       >
                         {cat} ({count} {newCampaign.channel === 'email' ? 'emails' : 'téléphones'})
@@ -768,9 +768,9 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   })}
                 </div>
 
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie Cible Sélectionnée *</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Catégorie Cible Sélectionnée *</label>
                 <select 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                  className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                   value={newCampaign.category} onChange={(e) => setNewCampaign({ ...newCampaign, category: e.target.value })}
                 >
                   <option value="">-- Sélectionnez une catégorie ou un segment --</option>
@@ -828,20 +828,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                 </select>
               </div>
 
-              <div className="bg-teal-50/50 border border-teal-100 rounded-xl p-4 space-y-1">
-                <h5 className="text-xs font-bold text-teal-800 flex items-center gap-1.5">
+              <div className="bg-accent-soft/50 border border-line rounded-xl p-4 space-y-1">
+                <h5 className="text-xs font-bold text-accent flex items-center gap-1.5">
                   <Send className="w-3.5 h-3.5" />
                   Prospection groupée intelligente
                 </h5>
-                <p className="text-slate-500 text-[11px] leading-normal">
+                <p className="text-fg-muted text-[11px] leading-normal">
                   Les e-mails seront envoyés automatiquement depuis votre infrastructure d'envoi dédiée, avec une temporisation pour protéger votre réputation.
                 </p>
               </div>
 
               {sendingBlockReason && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-2.5">
-                  <XCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-amber-800 text-[11px] leading-normal font-semibold">
+                <div className="bg-[var(--wt-warning-soft)] border border-line rounded-xl p-4 flex items-start gap-2.5">
+                  <XCircle className="w-4 h-4 text-[var(--wt-warning)] flex-shrink-0 mt-0.5" />
+                  <p className="text-[var(--wt-warning-fg)] text-[11px] leading-normal font-semibold">
                     {sendingBlockReason}
                   </p>
                 </div>
@@ -849,7 +849,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
               <button
                 type="submit"
-                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm shadow-sm hover:bg-teal-700 active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-accent text-white font-semibold text-sm shadow-sm hover:bg-accent active:scale-95 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={campaignPreviewLeads.length === 0 || !newCampaign.template_id || !!sendingBlockReason}
                 title={sendingBlockReason || undefined}
               >
@@ -858,32 +858,32 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
             </form>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[440px] flex flex-col justify-between">
+          <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[440px] flex flex-col justify-between">
             <div>
-              <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center gap-2">
-                <Eye className="w-5 h-5 text-teal-600" />
+              <h3 className="font-display font-extrabold text-fg text-lg mb-4 flex items-center gap-2">
+                <Eye className="w-5 h-5 text-accent" />
                 Aperçu du Draft Client
               </h3>
 
               {campaignPreviewLeads.length === 0 || !newCampaign.template_id ? (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <div className="flex flex-col items-center justify-center py-20 text-fg-subtle">
                   <Users className="w-12 h-12 opacity-30 mb-3" />
                   <p className="text-xs text-center max-w-[240px]">Sélectionnez un canal, un modèle et une catégorie pour simuler les messages.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
-                    <span className="text-xs text-slate-500 font-semibold">Destinataire {selectedPreviewLeadIdx + 1} sur {campaignPreviewLeads.length}</span>
+                  <div className="flex justify-between items-center bg-surface-2 border border-line rounded-xl px-4 py-2.5">
+                    <span className="text-xs text-fg-muted font-semibold">Destinataire {selectedPreviewLeadIdx + 1} sur {campaignPreviewLeads.length}</span>
                     <div className="flex gap-1.5">
                       <button 
-                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
+                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-surface border border-line text-fg disabled:opacity-40"
                         disabled={selectedPreviewLeadIdx === 0}
                         onClick={() => setSelectedPreviewLeadIdx(selectedPreviewLeadIdx - 1)}
                       >
                         Précédent
                       </button>
                       <button 
-                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
+                        className="px-2.5 py-1 rounded-lg font-semibold text-2xs bg-surface border border-line text-fg disabled:opacity-40"
                         disabled={selectedPreviewLeadIdx === campaignPreviewLeads.length - 1}
                         onClick={() => setSelectedPreviewLeadIdx(selectedPreviewLeadIdx + 1)}
                       >
@@ -893,20 +893,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   </div>
 
                   {/* Message header preview */}
-                  <div className="pb-3 border-b border-slate-100 space-y-1">
-                    <p className="text-xs text-slate-500">
-                      Canal : <span className="font-bold text-slate-700 uppercase">{newCampaign.channel}</span>
+                  <div className="pb-3 border-b border-line space-y-1">
+                    <p className="text-xs text-fg-muted">
+                      Canal : <span className="font-bold text-fg uppercase">{newCampaign.channel}</span>
                     </p>
-                    <p className="text-xs text-slate-500">
-                      Destinataire : <strong className="text-teal-700">
+                    <p className="text-xs text-fg-muted">
+                      Destinataire : <strong className="text-accent">
                         {newCampaign.channel === 'email' 
                           ? campaignPreviewLeads[selectedPreviewLeadIdx].email 
                           : campaignPreviewLeads[selectedPreviewLeadIdx].phone || 'Non renseigné'}
                       </strong> ({campaignPreviewLeads[selectedPreviewLeadIdx].name})
                     </p>
                     {newCampaign.channel === 'email' && (
-                      <p className="text-xs text-slate-500">
-                        Objet : <strong className="text-slate-800">
+                      <p className="text-xs text-fg-muted">
+                        Objet : <strong className="text-fg">
                           {compileClientDraft(
                             templates.find(t => t.id === parseInt(newCampaign.template_id))?.subject,
                             campaignPreviewLeads[selectedPreviewLeadIdx],
@@ -922,7 +922,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     unsubscribe notice, i.e. what actually leaves. Showing the
                     body without the notice misrepresented every campaign.
                   */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-200 font-mono whiteSpace-pre-wrap overflow-y-auto max-h-[200px]">
+                  <div className="bg-[var(--wt-rail-bg)] border border-[var(--wt-rail-line)] rounded-xl p-4 text-xs text-[var(--wt-rail-fg)] font-mono whiteSpace-pre-wrap overflow-y-auto max-h-[200px]">
                     {buildPreviewBody(
                       campaignPreviewLeads[selectedPreviewLeadIdx],
                       templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -930,7 +930,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   </div>
 
                   {newCampaign.channel === 'email' && !previewUnsubscribeUrl && (
-                    <p className="text-[11px] leading-normal text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-[11px] leading-normal text-[var(--wt-warning-fg)] bg-[var(--wt-warning-soft)] border border-line rounded-xl p-3">
                       {UNSUBSCRIBE_LINK_PENDING}
                     </p>
                   )}
@@ -939,7 +939,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   <div className="flex flex-wrap gap-2 pt-2">
                     <button 
                       type="button" 
-                      className="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150 shadow-sm"
+                      className="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2 active:scale-95 transition-all duration-150 shadow-sm"
                       onClick={() => handleCopyClipboard(
                         campaignPreviewLeads[selectedPreviewLeadIdx],
                         templates.find(t => t.id === parseInt(newCampaign.template_id))
@@ -957,7 +957,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                       */
                       !previewUnsubscribeUrl ? (
                         <span
-                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-400 font-semibold text-xs cursor-not-allowed"
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-surface-2 border border-line text-fg-subtle font-semibold text-xs cursor-not-allowed"
                           title={UNSUBSCRIBE_LINK_PENDING}
                         >
                           Envoi manuel indisponible
@@ -971,7 +971,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all duration-150 shadow-sm"
                           title="Ouvrir avec votre logiciel de messagerie par défaut (Apple Mail, Outlook, etc.)"
                         >
                           Ouvrir le client Mail
@@ -984,7 +984,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-red-600 text-white font-semibold text-xs hover:bg-red-700 active:scale-95 transition-all duration-150 shadow-sm"
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[var(--wt-danger)] text-white font-semibold text-xs hover:bg-[var(--wt-danger)] active:scale-95 transition-all duration-150 shadow-sm"
                           title="Ouvrir directement dans Gmail sur le web"
                         >
                           Gmail Web
@@ -1000,7 +1000,7 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150 shadow-sm"
+                        className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all duration-150 shadow-sm"
                       >
                         Ouvrir SMS
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -1016,20 +1016,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       {/* TAB 3: CAMPAIGNS HISTORY LIST */}
       {activeTab === 'history' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Historique des Campagnes</h3>
+        <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+          <h3 className="font-display font-extrabold text-fg text-lg mb-4">Historique des Campagnes</h3>
           
           {campaigns.length === 0 ? (
-            <div className="text-center py-16 text-slate-400">
-              <Clock className="w-12 h-12 mx-auto mb-3 opacity-30 text-teal-600" />
-              <h4 className="font-heading font-bold text-slate-700">Aucune campagne lancée</h4>
+            <div className="text-center py-16 text-fg-subtle">
+              <Clock className="w-12 h-12 mx-auto mb-3 opacity-30 text-accent" />
+              <h4 className="font-display font-bold text-fg">Aucune campagne lancée</h4>
               <p className="text-xs mt-1">Vous pourrez suivre vos outreachs automatisés ici.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto border border-slate-100 rounded-xl">
+            <div className="overflow-x-auto border border-line rounded-xl">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold text-xs uppercase tracking-wider">
+                  <tr className="bg-surface-2 border-b border-line text-fg-subtle font-semibold text-xs uppercase tracking-wider">
                     <th className="p-4">Nom de la Campagne</th>
                     <th className="p-4">Canal</th>
                     <th className="p-4">Modèle</th>
@@ -1042,35 +1042,35 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-line text-fg">
                   {campaigns.map(camp => (
-                    <tr key={camp.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-bold text-slate-800">{camp.name}</td>
-                      <td className="p-4 text-xs font-semibold capitalize text-slate-600">{camp.channel || 'email'}</td>
-                      <td className="p-4 text-slate-500">{camp.template_name}</td>
-                      <td className="p-4 font-bold text-slate-800">{camp.total_leads}</td>
-                      <td className="p-4 font-semibold text-emerald-600">{camp.sent_count}</td>
-                      <td className={`p-4 font-semibold ${camp.failed_count > 0 ? 'text-red-500' : 'text-slate-400'}`}>{camp.failed_count}</td>
+                    <tr key={camp.id} className="hover:bg-surface-2/50 transition-colors">
+                      <td className="p-4 font-bold text-fg">{camp.name}</td>
+                      <td className="p-4 text-xs font-semibold capitalize text-fg-muted">{camp.channel || 'email'}</td>
+                      <td className="p-4 text-fg-muted">{camp.template_name}</td>
+                      <td className="p-4 font-bold text-fg">{camp.total_leads}</td>
+                      <td className="p-4 font-semibold text-[var(--wt-success)]">{camp.sent_count}</td>
+                      <td className={`p-4 font-semibold ${camp.failed_count > 0 ? 'text-[var(--wt-danger)]' : 'text-fg-subtle'}`}>{camp.failed_count}</td>
                       <td
-                        className={`p-4 font-semibold ${(camp.skipped_count || 0) > 0 ? 'text-slate-600' : 'text-slate-400'}`}
+                        className={`p-4 font-semibold ${(camp.skipped_count || 0) > 0 ? 'text-fg-muted' : 'text-fg-subtle'}`}
                         title={(camp.skipped_count || 0) > 0 ? "Destinataires désinscrits : ils comptent dans les cibles mais n'ont reçu aucun message." : undefined}
                       >
                         {camp.skipped_count || 0}
                       </td>
-                      <td className="p-4 text-xs text-slate-400">{new Date(camp.created_at).toLocaleDateString()}</td>
+                      <td className="p-4 text-xs text-fg-subtle">{new Date(camp.created_at).toLocaleDateString()}</td>
                       <td className="p-4">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-bold uppercase tracking-wider ${
-                          camp.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                          camp.status === 'Active' ? 'bg-teal-50 text-teal-700 border border-teal-100' : 
-                          camp.status === 'Paused' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
-                          'bg-slate-100 text-slate-600 border border-slate-200'
+                          camp.status === 'Completed' ? 'bg-[var(--wt-success-soft)] text-[var(--wt-success-fg)] border border-line' : 
+                          camp.status === 'Active' ? 'bg-accent-soft text-accent border border-line' : 
+                          camp.status === 'Paused' ? 'bg-[var(--wt-warning-soft)] text-[var(--wt-warning-fg)] border border-line' : 
+                          'bg-surface-2 text-fg-muted border border-line'
                         }`}>
                           {camp.status}
                         </span>
                       </td>
                       <td className="p-4 text-right">
                         <button 
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs transition-colors" 
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-2 border border-line text-fg font-semibold text-xs transition-colors" 
                           onClick={() => viewCampaignDetails(camp.id)}
                         >
                           Suivi
@@ -1089,35 +1089,35 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
       {/* TAB 4: ACTIVE MONITOR */}
       {activeTab === 'active-monitor' && selectedCampaignDetails && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-5">Statut de la Campagne</h3>
+          <div className="lg:col-span-4 bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-display font-extrabold text-fg text-lg mb-5">Statut de la Campagne</h3>
             
             <div className="space-y-4">
               <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Nom</span>
-                <strong className="text-slate-800 text-sm font-bold">{selectedCampaignDetails.campaign.name}</strong>
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">Nom</span>
+                <strong className="text-fg text-sm font-bold">{selectedCampaignDetails.campaign.name}</strong>
               </div>
 
               <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Canal</span>
-                <span className="text-slate-600 text-xs font-semibold capitalize">{selectedCampaignDetails.campaign.channel || 'email'}</span>
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">Canal</span>
+                <span className="text-fg-muted text-xs font-semibold capitalize">{selectedCampaignDetails.campaign.channel || 'email'}</span>
               </div>
               
               <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Gabarit de Message</span>
-                <span className="text-slate-600 text-xs">{selectedCampaignDetails.campaign.template_name}</span>
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">Gabarit de Message</span>
+                <span className="text-fg-muted text-xs">{selectedCampaignDetails.campaign.template_name}</span>
               </div>
 
               <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Progression</span>
-                <div className="flex justify-between text-xs font-semibold text-slate-700 mt-1 mb-2">
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">Progression</span>
+                <div className="flex justify-between text-xs font-semibold text-fg mt-1 mb-2">
                   <span>{campaignProgress.processed} / {campaignProgress.total} cibles</span>
                   <span>{campaignProgress.percent}%</span>
                 </div>
                 {/* Progress bar */}
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-teal-600 rounded-full transition-all duration-300"
+                    className="h-full bg-accent rounded-full transition-all duration-300"
                     style={{ width: `${campaignProgress.percent}%` }}
                   ></div>
                 </div>
@@ -1128,8 +1128,8 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                   what happened to the missing recipients.
                 */}
                 {campaignProgress.skipped > 0 && (
-                  <p className="text-[11px] text-slate-500 leading-normal mt-2">
-                    <strong className="text-slate-700">{campaignProgress.skipped}</strong>{' '}
+                  <p className="text-[11px] text-fg-muted leading-normal mt-2">
+                    <strong className="text-fg">{campaignProgress.skipped}</strong>{' '}
                     {campaignProgress.skipped > 1 ? 'destinataires désinscrits' : 'destinataire désinscrit'}{' '}
                     {campaignProgress.skipped > 1 ? 'ont été ignorés' : 'a été ignoré'} : aucun message ne
                     leur a été envoyé, conformément à leur demande de désinscription. Ils comptent dans
@@ -1139,19 +1139,19 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
               </div>
 
               {/* Status Actions */}
-              <div className="flex gap-2 pt-4 border-t border-slate-100">
+              <div className="flex gap-2 pt-4 border-t border-line">
                 {selectedCampaignDetails.campaign.status === 'Active' ? (
-                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors" onClick={() => handlePauseCampaign(selectedCampaignDetails.campaign.id)}>
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2 transition-colors" onClick={() => handlePauseCampaign(selectedCampaignDetails.campaign.id)}>
                     <Pause className="w-3.5 h-3.5" />
                     Pause
                   </button>
                 ) : ['Paused', 'Pending'].includes(selectedCampaignDetails.campaign.status) ? (
-                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 transition-colors" onClick={() => handleResumeCampaign(selectedCampaignDetails.campaign.id)}>
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent transition-colors" onClick={() => handleResumeCampaign(selectedCampaignDetails.campaign.id)}>
                     <Play className="w-3.5 h-3.5" />
                     Reprendre
                   </button>
                 ) : (
-                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs hover:bg-amber-700 transition-colors" onClick={() => handleRestartCampaign(selectedCampaignDetails.campaign.id)}>
+                  <button className="flex-grow inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[var(--wt-warning)] text-white font-semibold text-xs hover:bg-[var(--wt-warning)] transition-colors" onClick={() => handleRestartCampaign(selectedCampaignDetails.campaign.id)}>
                     <RefreshCw className="w-3.5 h-3.5" />
                     Relancer la Campagne
                   </button>
@@ -1160,54 +1160,54 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
             </div>
           </div>
 
-          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-            <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center justify-between">
+          <div className="lg:col-span-8 bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+            <h3 className="font-display font-extrabold text-fg text-lg mb-4 flex items-center justify-between">
               Rapports de distribution en temps réel
               {selectedCampaignDetails.campaign.status === 'Active' && (
-                <RefreshCw className="w-4 h-4 text-teal-600 animate-spin" />
+                <RefreshCw className="w-4 h-4 text-accent animate-spin" />
               )}
             </h3>
             
-            <div className="overflow-x-auto border border-slate-100 rounded-xl max-h-[360px] overflow-y-auto">
+            <div className="overflow-x-auto border border-line rounded-xl max-h-[360px] overflow-y-auto">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase tracking-wider">
+                  <tr className="bg-surface-2 border-b border-line text-fg-subtle font-semibold uppercase tracking-wider">
                     <th className="p-3">Prospect</th>
                     <th className="p-3">Coordonnées</th>
                     <th className="p-3">Heure</th>
                     <th className="p-3">Statut</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-line text-fg">
                   {selectedCampaignDetails.logs.map(log => (
-                    <tr key={log.id} className="hover:bg-slate-50/30 transition-colors">
-                      <td className="p-3 font-bold text-slate-800">{log.lead_name}</td>
-                      <td className="p-3 text-slate-500">
+                    <tr key={log.id} className="hover:bg-surface-2/30 transition-colors">
+                      <td className="p-3 font-bold text-fg">{log.lead_name}</td>
+                      <td className="p-3 text-fg-muted">
                         {selectedCampaignDetails.campaign.channel === 'email' 
                           ? log.lead_email || '—' 
                           : log.lead_phone || '—'}
                       </td>
-                      <td className="p-3 text-slate-400">
+                      <td className="p-3 text-fg-subtle">
                         {log.sent_at ? new Date(log.sent_at).toLocaleTimeString() : 'En attente'}
                       </td>
                       <td className="p-3">
                         {log.status === 'Sent' ? (
-                          <span className="text-emerald-600 flex items-center gap-1 font-semibold">
+                          <span className="text-[var(--wt-success)] flex items-center gap-1 font-semibold">
                             <CheckCircle className="w-3.5 h-3.5" />
                             Envoyé
                           </span>
                         ) : log.status === 'Failed' ? (
-                          <span className="text-red-500 flex items-center gap-1 font-semibold" title={log.error_message}>
+                          <span className="text-[var(--wt-danger)] flex items-center gap-1 font-semibold" title={log.error_message}>
                             <XCircle className="w-3.5 h-3.5" />
                             Échec
                           </span>
                         ) : log.status === 'Skipped' ? (
-                          <span className="text-slate-500 flex items-center gap-1 font-semibold" title={log.error_message}>
+                          <span className="text-fg-muted flex items-center gap-1 font-semibold" title={log.error_message}>
                             <MinusCircle className="w-3.5 h-3.5" />
                             Ignoré
                           </span>
                         ) : (
-                          <span className="text-slate-400 flex items-center gap-1">
+                          <span className="text-fg-subtle flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5" />
                             En attente
                           </span>
