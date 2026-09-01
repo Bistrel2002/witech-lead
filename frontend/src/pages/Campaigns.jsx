@@ -35,6 +35,48 @@ const SMS_COMING_SOON_HINT =
 const UNSUBSCRIBE_LINK_PENDING =
   "Le lien de désinscription de ce prospect n'est pas encore disponible. Chaque e-mail de prospection doit en contenir un — patientez quelques instants ou actualisez la page.";
 
+/* The relaunch control for one campaign in the report.
+ *
+ * Four states, and the button is present in all of them but the first: a
+ * control that disappears leaves the customer wondering whether they missed
+ * it, whereas a disabled one with a countdown explains itself.
+ *
+ * Every value comes from campaign.relaunch, derived server-side by
+ * outreachPolicy — the delay and the cap must not be restated here. */
+function RelaunchButton({ campaign, onRelaunch, busy }) {
+  const r = campaign.relaunch;
+  if (!r || r.state === 'never_run') return null;
+
+  const label =
+    r.state === 'complete' ? `Terminée · ${r.runs}/${r.maxRuns}`
+    : r.state === 'cooling' ? `Relance dans ${r.daysRemaining} j`
+    : 'Relancer la campagne';
+
+  const title =
+    r.state === 'complete'
+      ? `Cette campagne a été envoyée ${r.runs} fois sur ${r.maxRuns} autorisées.`
+      : r.state === 'cooling'
+        ? `Un délai de ${r.cooldownDays} jours sépare deux envois. Encore ${r.daysRemaining} jour(s).`
+        : `Envoi ${r.runs + 1} sur ${r.maxRuns}.`;
+
+  return (
+    <button
+      type="button"
+      disabled={!r.canRelaunch || busy}
+      title={title}
+      onClick={() => onRelaunch(campaign)}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+        r.canRelaunch && !busy
+          ? 'bg-accent-soft border-accent text-accent hover:brightness-105 cursor-pointer'
+          : 'bg-surface-2 border-line text-fg-subtle cursor-not-allowed'
+      }`}
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+      {label}
+    </button>
+  );
+}
+
 export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUser }) {
   const [templates, setTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -361,6 +403,46 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
   };
 
   // Handle Campaign wizard launch
+  const [relaunchingId, setRelaunchingId] = useState(null);
+
+  /* Second wave for an existing campaign.
+   *
+   * Confirmed first: it puts real emails in front of real people, and the
+   * button sits one row away from "Suivi". The refusal path matters as much
+   * as the success one — the server owns the rule, so whatever it says is
+   * what the customer is told. */
+  const handleRelaunch = async (camp) => {
+    const r = camp.relaunch;
+    if (!r?.canRelaunch) return;
+    if (!window.confirm(
+      `Relancer « ${camp.name} » ?\n\nCe sera l'envoi ${r.runs + 1} sur ${r.maxRuns}. ` +
+      `Les prospects déjà contactés deux fois, ou contactés il y a moins de ${r.cooldownDays ?? 4} jours, seront ignorés.`
+    )) return;
+
+    setRelaunchingId(camp.id);
+    try {
+      const res = await fetch(`${apiHost}/api/campaigns/${camp.id}/relaunch`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`Relance lancée : ${data.queued} prospect(s) en file (envoi ${data.run}/${data.maxRuns}).`);
+        await loadCampaigns();
+      } else {
+        alert(data.error || 'La relance a échoué.');
+        // Refresh anyway: the refusal usually means our copy of the campaign
+        // is stale, and the button should settle into its real state.
+        await loadCampaigns();
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Impossible de contacter le serveur.');
+    } finally {
+      setRelaunchingId(null);
+    }
+  };
+
   const handleCreateCampaign = async (e) => {
     e.preventDefault();
     if (!newCampaign.name || !newCampaign.template_id || !newCampaign.category) {
@@ -1096,14 +1178,21 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
                           {camp.status}
                         </span>
                       </td>
-                      <td className="p-4 text-right">
-                        <button 
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-2 border border-line text-fg font-semibold text-xs transition-colors" 
-                          onClick={() => viewCampaignDetails(camp.id)}
-                        >
-                          Suivi
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
+                      <td className="p-4">
+                        <div className="flex items-center justify-end gap-2">
+                          <RelaunchButton
+                            campaign={camp}
+                            busy={relaunchingId === camp.id}
+                            onRelaunch={handleRelaunch}
+                          />
+                          <button
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-2 border border-line text-fg font-semibold text-xs transition-colors"
+                            onClick={() => viewCampaignDetails(camp.id)}
+                          >
+                            Suivi
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

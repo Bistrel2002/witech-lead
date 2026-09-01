@@ -6,6 +6,8 @@ import {
   lapseSilentProspects,
   describeOutreach,
   withOutreach,
+  describeRelaunch,
+  MAX_CAMPAIGN_RUNS,
   BLOCK_REASONS,
   RECONTACT_COOLDOWN_DAYS,
   MAX_CONTACT_ATTEMPTS,
@@ -215,4 +217,56 @@ test('withOutreach leaves an empty list alone', async () => {
   const db = fakeDb([]);
   assert.deepEqual(await withOutreach(db, [], NOW), []);
   assert.equal(db.calls.length, 0);
+});
+
+// --- describeRelaunch: the campaign-level cycle -----------------------------
+
+test('a campaign never run offers no relaunch', () => {
+  const r = describeRelaunch({ run_count: 0, last_run_at: null }, NOW);
+  assert.equal(r.state, 'never_run');
+  assert.equal(r.canRelaunch, false);
+});
+
+test('after one run the relaunch is held for the cooldown', () => {
+  const r = describeRelaunch({ run_count: 1, last_run_at: daysAgo(1) }, NOW);
+  assert.equal(r.state, 'cooling');
+  assert.equal(r.canRelaunch, false);
+  assert.equal(r.daysRemaining, RECONTACT_COOLDOWN_DAYS - 1);
+});
+
+test('the relaunch opens exactly on the fourth day', () => {
+  // Both sides of the boundary: a day early is a wasted click, a day late is
+  // a wasted day of prospecting.
+  assert.equal(describeRelaunch({ run_count: 1, last_run_at: daysAgo(RECONTACT_COOLDOWN_DAYS - 0.01) }, NOW).canRelaunch, false);
+  assert.equal(describeRelaunch({ run_count: 1, last_run_at: daysAgo(RECONTACT_COOLDOWN_DAYS + 0.01) }, NOW).canRelaunch, true);
+});
+
+test('a campaign ready to relaunch reports no days remaining', () => {
+  const r = describeRelaunch({ run_count: 1, last_run_at: daysAgo(10) }, NOW);
+  assert.equal(r.state, 'ready');
+  assert.equal(r.canRelaunch, true);
+  assert.equal(r.daysRemaining, 0);
+});
+
+test('after the second run the campaign is complete for good', () => {
+  // Age must never reopen it: two waves is the whole life of a campaign.
+  const r = describeRelaunch({ run_count: MAX_CAMPAIGN_RUNS, last_run_at: daysAgo(400) }, NOW);
+  assert.equal(r.state, 'complete');
+  assert.equal(r.canRelaunch, false);
+  assert.equal(r.daysRemaining, null);
+});
+
+test('a campaign run more times than the cap stays complete', () => {
+  // Campaigns from before the cap existed can exceed it.
+  const r = describeRelaunch({ run_count: 5, last_run_at: daysAgo(30) }, NOW);
+  assert.equal(r.state, 'complete');
+  assert.equal(r.canRelaunch, false);
+});
+
+test('the campaign cooldown matches the prospect cooldown', () => {
+  // If a campaign could relaunch before its prospects may be re-contacted,
+  // the relaunch would produce a wave in which everybody is skipped.
+  const campaign = describeRelaunch({ run_count: 1, last_run_at: daysAgo(2) }, NOW);
+  const prospect = evaluate({ attempts: 1, lastSentAt: daysAgo(2) }, NOW);
+  assert.equal(campaign.daysRemaining, prospect.daysRemaining);
 });

@@ -25,6 +25,12 @@ export const RECONTACT_COOLDOWN_DAYS = 4;
 export const MAX_CONTACT_ATTEMPTS = 2;
 export const NO_REPLY_LAPSE_DAYS = 14;
 
+/* A campaign is a finite thing: it goes out, it waits, it goes out once more,
+ * and then it is done. Same numbers as the per-prospect rule on purpose — a
+ * campaign that could relaunch sooner than its prospects can be re-contacted
+ * would just produce a wave where everybody is skipped. */
+export const MAX_CAMPAIGN_RUNS = 2;
+
 export const BLOCK_REASONS = {
   MAX_ATTEMPTS: 'max_attempts',
   COOLDOWN: 'cooldown'
@@ -188,4 +194,39 @@ export async function withOutreach(db, leads, now = new Date()) {
     ...lead,
     outreach: describeOutreach(state.get(Number(lead.id)), now)
   }));
+}
+
+/**
+ * Whether a campaign may be sent again, and when.
+ *
+ * Mirrors the per-prospect rule at the campaign level so the button never
+ * offers a relaunch that would be refused prospect by prospect.
+ */
+export function describeRelaunch(campaign, now = new Date()) {
+  const runs = Number(campaign?.run_count ?? 0);
+  const lastRunAt = campaign?.last_run_at ? new Date(campaign.last_run_at) : null;
+
+  if (runs === 0) {
+    return { runs, maxRuns: MAX_CAMPAIGN_RUNS, state: 'never_run', canRelaunch: false, daysRemaining: null };
+  }
+
+  if (runs >= MAX_CAMPAIGN_RUNS) {
+    // Terminal. The button stays visible but never becomes available again:
+    // hiding it would leave the customer wondering whether they missed it.
+    return { runs, maxRuns: MAX_CAMPAIGN_RUNS, state: 'complete', canRelaunch: false, daysRemaining: null };
+  }
+
+  const elapsed = lastRunAt ? (now.getTime() - lastRunAt.getTime()) / 86400000 : null;
+  if (elapsed !== null && elapsed < RECONTACT_COOLDOWN_DAYS) {
+    return {
+      runs,
+      maxRuns: MAX_CAMPAIGN_RUNS,
+      state: 'cooling',
+      canRelaunch: false,
+      daysRemaining: Math.max(0, Math.ceil(RECONTACT_COOLDOWN_DAYS - elapsed)),
+      cooldownDays: RECONTACT_COOLDOWN_DAYS
+    };
+  }
+
+  return { runs, maxRuns: MAX_CAMPAIGN_RUNS, state: 'ready', canRelaunch: true, daysRemaining: 0 };
 }
