@@ -36,6 +36,10 @@ import {
 
 const PIPELINE_STATUSES = [
   'New',
+  // Set by the campaign runner when an email send found no address but the
+  // prospect still has a phone number. Not a stage of the sale: a bucket of
+  // work that needs a human rather than a send.
+  'Call Only',
   'Contacted',
   'Meeting Scheduled',
   'Proposal Sent',
@@ -799,6 +803,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case 'New': return 'bg-surface-2 border-line text-fg-muted';
+      case 'Call Only': return 'bg-[var(--wt-warning-soft)] border-line text-[var(--wt-warning-fg)]';
       case 'Contacted': return 'bg-accent-soft border-line text-accent';
       case 'Meeting Scheduled': return 'bg-accent-soft border-line text-accent';
       case 'Proposal Sent': return 'bg-accent-soft border-line text-accent';
@@ -811,6 +816,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const getStatusLabel = (status) => {
     const labels = {
       'New': 'Nouveau',
+      'Call Only': 'Appel uniquement',
       'Contacted': 'Contacté',
       'Meeting Scheduled': 'RDV Planifié',
       'Proposal Sent': 'Devis Envoyé',
