@@ -191,7 +191,12 @@ test('the suppression check runs before the send, not after', async () => {
   const { db } = await runCampaign({ prospects: [prospect(1)] });
 
   const checkIndex = db.calls.findIndex((c) => /FROM unsubscribes/i.test(c.sql));
-  const sendMarkerIndex = db.calls.findIndex((c) => /status = 'Sent'/i.test(c.sql));
+  // Anchored on the write that marks a send, not on any statement mentioning
+  // 'Sent': the re-contact policy reads campaign_logs WHERE status = 'Sent'
+  // earlier in the loop, and a looser pattern matches that instead.
+  const sendMarkerIndex = db.calls.findIndex(
+    (c) => /UPDATE campaign_logs SET status = 'Sent'/i.test(c.sql)
+  );
   assert.ok(checkIndex >= 0, 'the suppression check must actually run');
   assert.ok(sendMarkerIndex >= 0);
   assert.ok(checkIndex < sendMarkerIndex, 'suppression must be checked before sending');

@@ -401,6 +401,20 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
 
       if (res.ok) {
         const campaign = await res.json();
+
+        /* The re-contact policy may have removed targets. Say so: a campaign
+         * that quietly shrinks from 120 prospects to 12 reads as a broken
+         * product, when it is the protection working. */
+        const x = campaign.excluded;
+        if (x && x.queued < x.requested) {
+          const reasons = [];
+          if (x.cooling) reasons.push(`${x.cooling} contacté(s) il y a moins de ${x.cooldownDays} jours`);
+          if (x.exhausted) reasons.push(`${x.exhausted} déjà relancé(s) ${x.maxAttempts} fois`);
+          alert(
+            `${x.queued} prospect(s) sur ${x.requested} ont été mis en file.\n\n` +
+            `Écartés : ${reasons.join(' · ')}.`
+          );
+        }
         
         // Auto-trigger background delivery send. /start now refuses with 400
         // and a readable French reason when this tenant cannot send (domain
@@ -422,7 +436,21 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         setNewCampaign({ name: '', template_id: '', category: '', channel: 'email' });
       } else {
         const data = await res.json();
-        alert(data.error || 'Erreur lors de la création de la campagne');
+        // The "nothing eligible" case carries the numbers behind the refusal,
+        // so the customer learns when they can prospect this list again
+        // instead of being told only that it failed.
+        const d = data.detail;
+        if (d) {
+          const parts = [];
+          if (d.cooling) parts.push(`${d.cooling} contacté(s) récemment`);
+          if (d.exhausted) parts.push(`${d.exhausted} déjà relancé(s) ${d.maxAttempts} fois`);
+          const when = d.nextEligibleInDays
+            ? `\n\nProchaine relance possible dans ${d.nextEligibleInDays} jour(s).`
+            : '';
+          alert(`${data.error}\n\n${d.requested} prospect(s) examiné(s) : ${parts.join(' · ')}.${when}`);
+        } else {
+          alert(data.error || 'Erreur lors de la création de la campagne');
+        }
       }
     } catch (err) {
       console.error(err);

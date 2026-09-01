@@ -2,6 +2,12 @@ import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
 import { runCampaignBackground, assertChannelSendable, SMS_UNAVAILABLE_MESSAGE } from './services/emailService.js';
+import {
+  partitionEligible,
+  BLOCK_REASONS,
+  RECONTACT_COOLDOWN_DAYS,
+  MAX_CONTACT_ATTEMPTS
+} from './services/outreachPolicy.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
 
@@ -1052,6 +1058,38 @@ router.post('/campaigns', async (req, res) => {
       return res.status(400).json({ error: 'No matching leads found for this campaign' });
     }
 
+    /* Drop prospects the re-contact policy protects.
+     *
+     * Prospecting the same category day after day otherwise means emailing
+     * the same businesses every run. The exclusions are reported back rather
+     * than applied silently: a campaign that quietly shrinks from 120 targets
+     * to 12 looks broken, and the customer needs to know it is the policy
+     * working, not the product failing. */
+    const requested = targets.map((t) => t.id);
+    const { eligible, blocked } = await partitionEligible(db, requested);
+
+    const cooling = blocked.filter((b) => b.reason === BLOCK_REASONS.COOLDOWN);
+    const exhausted = blocked.filter((b) => b.reason === BLOCK_REASONS.MAX_ATTEMPTS);
+
+    if (eligible.length === 0) {
+      const soonest = cooling.length
+        ? Math.min(...cooling.map((b) => b.daysRemaining ?? RECONTACT_COOLDOWN_DAYS))
+        : null;
+      return res.status(400).json({
+        error: 'Aucun prospect éligible pour cette campagne.',
+        detail: {
+          requested: requested.length,
+          cooling: cooling.length,
+          exhausted: exhausted.length,
+          nextEligibleInDays: soonest,
+          cooldownDays: RECONTACT_COOLDOWN_DAYS,
+          maxAttempts: MAX_CONTACT_ATTEMPTS
+        }
+      });
+    }
+
+    targets = eligible.map((id) => ({ id }));
+
     // Insert Campaign
     const result = await db.run(
       'INSERT INTO campaigns (user_id, name, template_id, total_leads, channel) VALUES (?, ?, ?, ?, ?)',
@@ -1068,7 +1106,19 @@ router.post('/campaigns', async (req, res) => {
     }
 
     const newCampaign = await db.get('SELECT * FROM campaigns WHERE id = ?', campaignId);
-    res.status(201).json(newCampaign);
+    res.status(201).json({
+      ...newCampaign,
+      // What the policy removed, so the UI can say so instead of leaving the
+      // customer to wonder where their targets went.
+      excluded: {
+        requested: requested.length,
+        queued: eligible.length,
+        cooling: cooling.length,
+        exhausted: exhausted.length,
+        cooldownDays: RECONTACT_COOLDOWN_DAYS,
+        maxAttempts: MAX_CONTACT_ATTEMPTS
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
