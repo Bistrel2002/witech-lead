@@ -1078,7 +1078,59 @@ router.post('/campaigns', async (req, res) => {
      * to 12 looks broken, and the customer needs to know it is the policy
      * working, not the product failing. */
     const requested = targets.map((t) => t.id);
-    const { eligible, blocked } = await partitionEligible(db, requested);
+
+    /* Classify prospects an email campaign cannot reach, before it launches.
+     *
+     * A campaign of 111 prospects that all lack an address burns one of the
+     * two waves a campaign gets and produces 111 failures. Sorting them here
+     * puts them in the column that fits — needs a phone call, or nothing left
+     * to try — and leaves the campaign targeting only people it can actually
+     * email. The send loop keeps its own version of this for prospects that
+     * lose their address between queueing and sending. */
+    const unreachable = { callOnly: 0, lost: 0 };
+    if (channelCheck.channel === 'email' && requested.length) {
+      const rows = await db.all(
+        `SELECT id, phone FROM leads
+          WHERE id IN (${requested.map(() => '?').join(',')})
+            AND COALESCE(email, '') = ''`,
+        ...requested
+      );
+      for (const row of rows) {
+        const next = row.phone ? 'Call Only' : 'Closed Lost';
+        await db.run(
+          "UPDATE leads SET status = ? WHERE id = ? AND status IN ('New', 'Call Only')",
+          next, row.id
+        );
+        await db.run(
+          'INSERT INTO lead_discussions (lead_id, type, content) VALUES (?, ?, ?)',
+          row.id,
+          'Note',
+          row.phone
+            ? `Campagne « ${name} » — aucune adresse e-mail, à contacter par téléphone`
+            : `Campagne « ${name} » — ni e-mail ni téléphone, prospect inexploitable`
+        ).catch((err) => {
+          // The journal records what happened; it is not a precondition for
+          // it. Never let a failed note stop a campaign being built.
+          console.error(`Campaign: could not record note for lead ${row.id}:`, err.message);
+        });
+        if (row.phone) unreachable.callOnly++; else unreachable.lost++;
+      }
+      const excludedIds = new Set(rows.map((r) => r.id));
+      targets = targets.filter((t) => !excludedIds.has(t.id));
+    }
+
+    if (targets.length === 0) {
+      return res.status(400).json({
+        error: "Aucun prospect de cette sélection n'a d'adresse e-mail.",
+        detail: {
+          requested: requested.length,
+          movedToCallOnly: unreachable.callOnly,
+          movedToLost: unreachable.lost
+        }
+      });
+    }
+
+    const { eligible, blocked } = await partitionEligible(db, targets.map((t) => t.id));
 
     const cooling = blocked.filter((b) => b.reason === BLOCK_REASONS.COOLDOWN);
     const exhausted = blocked.filter((b) => b.reason === BLOCK_REASONS.MAX_ATTEMPTS);
@@ -1127,6 +1179,8 @@ router.post('/campaigns', async (req, res) => {
         queued: eligible.length,
         cooling: cooling.length,
         exhausted: exhausted.length,
+        noEmailCallOnly: unreachable.callOnly,
+        noEmailLost: unreachable.lost,
         cooldownDays: RECONTACT_COOLDOWN_DAYS,
         maxAttempts: MAX_CONTACT_ATTEMPTS
       }

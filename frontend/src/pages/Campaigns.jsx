@@ -490,6 +490,8 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         const x = campaign.excluded;
         if (x && x.queued < x.requested) {
           const reasons = [];
+          if (x.noEmailCallOnly) reasons.push(`${x.noEmailCallOnly} sans e-mail → « Appel uniquement »`);
+          if (x.noEmailLost) reasons.push(`${x.noEmailLost} sans e-mail ni téléphone → « Perdu »`);
           if (x.cooling) reasons.push(`${x.cooling} contacté(s) il y a moins de ${x.cooldownDays} jours`);
           if (x.exhausted) reasons.push(`${x.exhausted} déjà relancé(s) ${x.maxAttempts} fois`);
           alert(
@@ -524,6 +526,8 @@ export default function Campaigns({ apiHost, leads = [], reloadLeads, currentUse
         const d = data.detail;
         if (d) {
           const parts = [];
+          if (d.movedToCallOnly) parts.push(`${d.movedToCallOnly} déplacé(s) en « Appel uniquement »`);
+          if (d.movedToLost) parts.push(`${d.movedToLost} déplacé(s) en « Perdu »`);
           if (d.cooling) parts.push(`${d.cooling} contacté(s) récemment`);
           if (d.exhausted) parts.push(`${d.exhausted} déjà relancé(s) ${d.maxAttempts} fois`);
           const when = d.nextEligibleInDays
