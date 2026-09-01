@@ -1301,13 +1301,34 @@ router.post('/campaigns/:id/relaunch', async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    // Everyone this campaign has ever targeted, then filtered by the
-    // per-prospect rule: somebody who replied and was moved on, or who has
-    // already had their two emails, must not be swept back in.
+    /* A relaunch chases the people who were emailed and have not answered,
+     * which is exactly the "Contacté" column.
+     *
+     * Not everyone the campaign ever touched: the prospects it moved to
+     * "Appel uniquement" have no address, so re-queueing them would only
+     * fail again, and the ones moved to "Perdu" have nothing left to try.
+     * Anyone the salesperson has since advanced to "RDV fixé" or beyond has
+     * answered — chasing them with the same email would be the worst
+     * possible follow-up.
+     *
+     * Then the per-prospect rule on top, for the four-day delay and the
+     * two-contact cap. */
     const previous = await db.all(
-      'SELECT DISTINCT lead_id FROM campaign_logs WHERE campaign_id = ? AND lead_id IS NOT NULL',
+      `SELECT DISTINCT cl.lead_id
+         FROM campaign_logs cl
+         JOIN leads l ON l.id = cl.lead_id
+        WHERE cl.campaign_id = ?
+          AND l.status = 'Contacted'`,
       id
     );
+
+    if (previous.length === 0) {
+      return res.status(400).json({
+        error: "Aucun prospect de cette campagne n'est en attente de relance.",
+        detail: { reason: 'La relance ne concerne que les prospects encore au statut « Contacté ».' }
+      });
+    }
+
     const { eligible, blocked } = await partitionEligible(db, previous.map((r) => r.lead_id));
 
     if (eligible.length === 0) {
