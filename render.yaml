@@ -109,10 +109,15 @@ services:
         name: X-Content-Type-Options
         value: nosniff
     routes:
-      # SPA catch-all: serve index.html for all client-side routes
+      # index.html is the public vitrine and app.html is the application, so
+      # the old blanket "/* -> /index.html" would answer every request with
+      # the marketing page. Only the app's own client-side routes need a
+      # rewrite, and they all live under /portal (App.jsx dispatches on
+      # /portal/admin-panel and /portal/team-space). Everything else resolves
+      # to a real file: / serves the vitrine, /app.html serves the app.
       - type: rewrite
-        source: /*
-        destination: /index.html
+        source: /portal/*
+        destination: /app.html
     envVars:
       - key: VITE_API_URL
         sync: false  # You'll set this to the backend Render URL

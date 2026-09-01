@@ -58,19 +58,24 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
     return acc;
   }, {});
 
+  // Brand ramp rather than six unrelated hues. The funnel runs violet ->
+  // magenta -> pink as a prospect warms up, a reply is the success green and
+  // do-not-contact the danger red, so colour carries the same meaning here as
+  // everywhere else in the product. Every slice is labelled with its value,
+  // so colour is never the only channel.
   const STATUS_COLORS = {
-    'New': '#64748b',            // slate-500
-    'Contacting': '#0d9488',     // teal-600
-    'Contacted': '#2563eb',      // blue-600
-    'Warm': '#d97706',           // amber-600
-    'Replied': '#10b981',        // emerald-500
-    'Do Not Contact': '#dc2626'  // red-600
+    'New': '#7e22ce',
+    'Contacting': '#9333ea',
+    'Contacted': '#c026d3',
+    'Warm': '#e879f9',
+    'Replied': 'var(--wt-success)',
+    'Do Not Contact': 'var(--wt-danger)'
   };
 
   const statusChartData = Object.entries(statusCounts).map(([name, value]) => ({
     name,
     value,
-    color: STATUS_COLORS[name] || '#64748b'
+    color: STATUS_COLORS[name] || 'var(--wt-fg-subtle)'
   }));
 
   // Activity Feed Generator
@@ -81,10 +86,10 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
       .slice(0, 4)
       .map((lead, idx) => {
         const actions = [
-          { text: `Nouveau prospect importé: "${lead.name}"`, time: 'Il y a 10 min', icon: Users, color: '#0d9488', bg: 'bg-teal-50', textCol: 'text-teal-700' },
-          { text: `Scraping réussi pour ${lead.name}`, time: 'Il y a 2h', icon: Globe, color: '#10b981', bg: 'bg-emerald-50', textCol: 'text-emerald-700' },
-          { text: `Lead mis à jour: status "${lead.status}"`, time: 'Il y a 5h', icon: Sparkles, color: '#d97706', bg: 'bg-amber-50', textCol: 'text-amber-700' },
-          { text: `Email envoyé à ${lead.email || lead.name}`, time: 'Hier', icon: Mail, color: '#2563eb', bg: 'bg-blue-50', textCol: 'text-blue-700' }
+          { text: `Nouveau prospect importé: "${lead.name}"`, time: 'Il y a 10 min', icon: Users, color: 'var(--wt-accent)', bg: 'bg-accent-soft', textCol: 'text-accent' },
+          { text: `Scraping réussi pour ${lead.name}`, time: 'Il y a 2h', icon: Globe, color: 'var(--wt-success)', bg: 'bg-[var(--wt-success-soft)]', textCol: 'text-[var(--wt-success-fg)]' },
+          { text: `Lead mis à jour: status "${lead.status}"`, time: 'Il y a 5h', icon: Sparkles, color: 'var(--wt-warning)', bg: 'bg-[var(--wt-warning-soft)]', textCol: 'text-[var(--wt-warning-fg)]' },
+          { text: `Email envoyé à ${lead.email || lead.name}`, time: 'Hier', icon: Mail, color: 'var(--wt-accent)', bg: 'bg-accent-soft', textCol: 'text-accent' }
         ];
         return {
           id: lead.id + '-' + idx,
@@ -104,10 +109,10 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
   ];
 
   const defaultStatusData = [
-    { name: 'New', value: 25, color: '#64748b' },
-    { name: 'Contacted', value: 18, color: '#2563eb' },
-    { name: 'Warm', value: 8, color: '#d97706' },
-    { name: 'Replied', value: 10, color: '#10b981' }
+    { name: 'New', value: 25, color: '#7e22ce' },
+    { name: 'Contacted', value: 18, color: 'var(--wt-accent)' },
+    { name: 'Warm', value: 8, color: 'var(--wt-warning)' },
+    { name: 'Replied', value: 10, color: 'var(--wt-success)' }
   ];
 
   return (
@@ -115,16 +120,16 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
       {/* Title Header */}
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-heading font-extrabold text-slate-800">Tableau de Bord</h2>
-          <p className="text-slate-500 text-sm mt-1">
+          <h2 className="text-2xl font-display font-extrabold text-fg">Tableau de Bord</h2>
+          <p className="text-fg-muted text-sm mt-1">
             Pilotez votre prospection commerciale Witech Lead.
           </p>
         </div>
         <div className="flex items-center">
-          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--wt-success-soft)] text-[var(--wt-success-fg)] border border-line">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--wt-success)] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--wt-success)]"></span>
             </span>
             Sync local active
           </span>
@@ -134,88 +139,88 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
         {/* Metric 1 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-teal-400 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-accent rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Total Prospects</span>
-            <Users className="w-5 h-5 text-teal-500" />
+            <Users className="w-5 h-5 text-accent" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{totalLeads}</div>
-          <div className="text-xs text-slate-500">Prospects importés dans la base</div>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{totalLeads}</div>
+          <div className="text-xs text-fg-muted">Prospects importés dans la base</div>
         </div>
 
         {/* Metric 2 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-[var(--wt-success)] rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Couverture Email</span>
-            <Globe className="w-5 h-5 text-emerald-500" />
+            <Globe className="w-5 h-5 text-[var(--wt-success)]" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{emailCoverage}%</div>
-          <div className="text-xs text-slate-500 flex items-center gap-1.5">
-            <span className="text-emerald-600 font-bold">{leadsWithEmail} / {totalLeads}</span>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{emailCoverage}%</div>
+          <div className="text-xs text-fg-muted flex items-center gap-1.5">
+            <span className="text-[var(--wt-success)] font-bold">{leadsWithEmail} / {totalLeads}</span>
             <span>avec email</span>
           </div>
         </div>
 
         {/* Metric 3 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-accent rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Total Contactés</span>
-            <Mail className="w-5 h-5 text-blue-500" />
+            <Mail className="w-5 h-5 text-accent" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{contactedLeads}</div>
-          <div className="text-xs text-slate-500">Campagnes e-mail ou mailto</div>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{contactedLeads}</div>
+          <div className="text-xs text-fg-muted">Campagnes e-mail ou mailto</div>
         </div>
 
         {/* Metric 4 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-[var(--wt-success)] rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Taux de Réponse</span>
-            <TrendingUp className="w-5 h-5 text-emerald-500" />
+            <TrendingUp className="w-5 h-5 text-[var(--wt-success)]" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{replyRate}%</div>
-          <div className="text-xs text-slate-500 flex items-center gap-1.5">
-            <span className="text-emerald-600 font-bold">{repliedLeads}</span>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{replyRate}%</div>
+          <div className="text-xs text-fg-muted flex items-center gap-1.5">
+            <span className="text-[var(--wt-success)] font-bold">{repliedLeads}</span>
             <span>retours chaleureux</span>
           </div>
         </div>
 
         {/* Metric 5 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-red-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-[var(--wt-warning)] rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Sans Site Web</span>
-            <AlertTriangle className="w-5 h-5 text-red-500" />
+            <AlertTriangle className="w-5 h-5 text-[var(--wt-danger)]" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{noWebsiteCount}</div>
-          <div className="text-xs text-slate-500">Cibles directes Web Design</div>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{noWebsiteCount}</div>
+          <div className="text-xs text-fg-muted">Cibles directes Web Design</div>
         </div>
 
         {/* Metric 6 */}
-        <div className="bg-white border border-slate-200 border-l-4 border-l-purple-500 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <div className="bg-surface border border-line border-l-4 border-l-[var(--wt-warning)] rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200">
+          <div className="flex justify-between items-center text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
             <span>Zéro Automatisation</span>
-            <Sparkles className="w-5 h-5 text-purple-500" />
+            <Sparkles className="w-5 h-5 text-accent" />
           </div>
-          <div className="font-heading text-3xl font-extrabold text-slate-800 leading-none mb-2">{noAutomationCount}</div>
-          <div className="text-xs text-slate-500">Cibles automatisation</div>
+          <div className="font-display text-3xl font-extrabold text-fg leading-none mb-2">{noAutomationCount}</div>
+          <div className="text-xs text-fg-muted">Cibles automatisation</div>
         </div>
       </div>
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category distribution Chart */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
-          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Répartition par Catégories</h3>
+        <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
+          <h3 className="font-display font-extrabold text-fg text-lg mb-4">Répartition par Catégories</h3>
           <div className="w-full h-64 mt-auto">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={totalLeads > 0 ? categoryChartData : defaultCategoryData}>
-                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                <XAxis dataKey="name" stroke="var(--wt-fg-subtle)" fontSize={11} tickLine={false} />
+                <YAxis stroke="var(--wt-fg-subtle)" fontSize={11} tickLine={false} axisLine={false} />
                 <Tooltip 
-                  contentStyle={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', color: '#1e293b' }}
+                  contentStyle={{ background: 'var(--wt-surface)', borderColor: 'var(--wt-line)', borderRadius: '8px', color: 'var(--wt-fg)' }}
                 />
-                <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="count" fill="var(--wt-brand-500)" radius={[6, 6, 0, 0]}>
                   {(totalLeads > 0 ? categoryChartData : defaultCategoryData).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#0d9488' : '#87D6C2'} />
+                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? 'var(--wt-brand-500)' : 'var(--wt-brand-700)'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -224,8 +229,8 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
         </div>
 
         {/* Funnel distribution chart */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
-          <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4">Tunnel de Prospection</h3>
+        <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200 min-h-[360px] flex flex-col">
+          <h3 className="font-display font-extrabold text-fg text-lg mb-4">Tunnel de Prospection</h3>
           <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-6 mt-auto py-2">
             <div className="w-40 h-40 flex-shrink-0">
               <ResponsiveContainer width="100%" height="100%">
@@ -244,16 +249,16 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
                     ))}
                   </Pie>
                   <Tooltip 
-                    contentStyle={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', color: '#1e293b' }}
+                    contentStyle={{ background: 'var(--wt-surface)', borderColor: 'var(--wt-line)', borderRadius: '8px', color: 'var(--wt-fg)' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
             </div>
             <div className="flex flex-col gap-2 min-w-[140px]">
               {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
-                <div key={index} className="flex items-center gap-2.5 text-xs text-slate-600">
+                <div key={index} className="flex items-center gap-2.5 text-xs text-fg-muted">
                   <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }}></span>
-                  <span>{entry.name}: <strong className="text-slate-800 font-bold">{entry.value}</strong></span>
+                  <span>{entry.name}: <strong className="text-fg font-bold">{entry.value}</strong></span>
                 </div>
               ))}
             </div>
@@ -262,15 +267,15 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
       </div>
 
       {/* Recent Activity Log */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
-        <h3 className="font-heading font-extrabold text-slate-800 text-lg mb-4 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-teal-600" />
+      <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+        <h3 className="font-display font-extrabold text-fg text-lg mb-4 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-accent" />
           Flux d'Activités Récentes
         </h3>
         
         {recentActivities.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">
-            <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-40 text-teal-500" />
+          <div className="text-center py-12 text-fg-subtle">
+            <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-40 text-accent" />
             <p className="text-sm">Aucune activité. Importez vos premiers prospects !</p>
           </div>
         ) : (
@@ -278,13 +283,13 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
             {recentActivities.map((act) => {
               const Icon = act.icon;
               return (
-                <div key={act.id} className="flex gap-4 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${act.bg} border border-slate-200`}>
+                <div key={act.id} className="flex gap-4 border-b border-line pb-4 last:border-b-0 last:pb-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${act.bg} border border-line`}>
                     <Icon className="w-4 h-4" style={{ color: act.color }} />
                   </div>
                   <div className="flex-grow">
-                    <p className="text-sm font-semibold text-slate-800">{act.text}</p>
-                    <span className="text-xs text-slate-400">{act.time}</span>
+                    <p className="text-sm font-semibold text-fg">{act.text}</p>
+                    <span className="text-xs text-fg-subtle">{act.time}</span>
                   </div>
                 </div>
               );

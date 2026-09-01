@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ThemeToggle } from './components/ui';
 import { 
   LayoutDashboard, 
   Users as UsersIcon, 
@@ -313,9 +314,9 @@ export default function App() {
   // 2. LOADING STATE
   if (checkingSession) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-500 font-sans">
-        <Zap className="w-12 h-12 text-teal-500 animate-bounce mb-4" />
-        <p className="text-sm font-heading font-medium tracking-wide">Vérification de la session Witech Lead...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-surface-2 text-fg-muted font-sans">
+        <Zap className="w-12 h-12 text-accent animate-bounce mb-4" />
+        <p className="text-sm font-display font-medium tracking-wide">Vérification de la session Witech Lead...</p>
       </div>
     );
   }
@@ -327,14 +328,14 @@ export default function App() {
 
   // 4. MAIN APP WITH NAVIGATION SIDEBAR
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50 text-slate-800 font-sans">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-surface-2 text-fg font-sans">
       {/* Mobile Top Bar */}
-      <div className="lg:hidden flex justify-between items-center bg-slate-900 text-white px-4 py-3 fixed top-0 left-0 w-full z-50 shadow-md">
+      <div className="lg:hidden flex justify-between items-center bg-[var(--wt-rail-bg)] text-white px-4 py-3 fixed top-0 left-0 w-full z-50 shadow-md">
         <div className="flex items-center gap-2">
-          <Zap className="text-teal-400 fill-teal-400 w-5 h-5 animate-pulse" />
-          <span className="font-heading font-heading font-extrabold text-lg">Wi'Tech <span className="text-teal-400">Lead</span></span>
+          <span style={{ backgroundImage: 'var(--wt-gradient)' }} className="w-6 h-6 rounded-lg shrink-0" />
+          <span className="font-display font-extrabold text-lg">Wi'Tech <span className="text-[var(--wt-brand-300)]">Lead</span></span>
         </div>
-        <button className="text-slate-300 hover:text-white" onClick={() => setMobileMenuOpen(true)}>
+        <button className="text-[var(--wt-rail-fg)] hover:text-white" onClick={() => setMobileMenuOpen(true)}>
           <Menu className="w-6 h-6" />
         </button>
       </div>
@@ -345,13 +346,13 @@ export default function App() {
       )}
 
       {/* Sidebar Navigation */}
-      <div className={`fixed lg:sticky top-0 left-0 h-screen w-64 bg-slate-900 text-slate-300 border-r border-slate-800 p-6 flex flex-col z-50 lg:z-30 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="flex items-center justify-between pb-6 border-b border-slate-800 mb-6">
+      <div className={`fixed lg:sticky top-0 left-0 h-screen w-64 bg-[var(--wt-rail-bg)] text-[var(--wt-rail-fg)] border-r border-[var(--wt-rail-line)] p-6 flex flex-col z-50 lg:z-30 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="flex items-center justify-between pb-6 border-b border-[var(--wt-rail-line)] mb-6">
           <div className="flex items-center gap-2">
-            <Zap className="text-teal-400 fill-teal-400 w-6 h-6" />
-            <span className="font-heading font-heading font-extrabold text-xl text-white">Wi'Tech <span className="text-teal-400">Lead</span></span>
+            <span style={{ backgroundImage: 'var(--wt-gradient)' }} className="w-7 h-7 rounded-xl shrink-0" />
+            <span className="font-display font-extrabold text-xl text-white">Wi'Tech <span className="text-[var(--wt-brand-300)]">Lead</span></span>
           </div>
-          <button className="lg:hidden text-slate-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>
+          <button className="lg:hidden text-[var(--wt-rail-fg)] hover:text-white" onClick={() => setMobileMenuOpen(false)}>
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -359,57 +360,63 @@ export default function App() {
         <ul className="flex flex-col gap-1 list-none flex-grow">
           <li>
             <div 
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'dashboard' ? 'text-white bg-teal-600/20 border border-teal-500/20 shadow-inner' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'dashboard' ? 'text-white bg-white/10' : 'text-[var(--wt-rail-fg)] hover:text-white hover:bg-white/5'}`}
               onClick={() => { setActivePage('dashboard'); setMobileMenuOpen(false); }}
             >
-              <LayoutDashboard className={`w-5 h-5 ${activePage === 'dashboard' ? 'text-teal-400' : ''}`} />
+              <LayoutDashboard className={`w-5 h-5 ${activePage === 'dashboard' ? 'text-[var(--wt-brand-300)]' : ''}`} />
               Tableau de Bord
             </div>
           </li>
           <li>
             <div 
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'leads' ? 'text-white bg-teal-600/20 border border-teal-500/20 shadow-inner' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'leads' ? 'text-white bg-white/10' : 'text-[var(--wt-rail-fg)] hover:text-white hover:bg-white/5'}`}
               onClick={() => { setActivePage('leads'); setMobileMenuOpen(false); }}
             >
-              <UsersIcon className={`w-5 h-5 ${activePage === 'leads' ? 'text-teal-400' : ''}`} />
+              <UsersIcon className={`w-5 h-5 ${activePage === 'leads' ? 'text-[var(--wt-brand-300)]' : ''}`} />
               Prospects
             </div>
           </li>
           <li>
             <div 
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'campaigns' ? 'text-white bg-teal-600/20 border border-teal-500/20 shadow-inner' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'campaigns' ? 'text-white bg-white/10' : 'text-[var(--wt-rail-fg)] hover:text-white hover:bg-white/5'}`}
               onClick={() => { setActivePage('campaigns'); setMobileMenuOpen(false); }}
             >
-              <Send className={`w-5 h-5 ${activePage === 'campaigns' ? 'text-teal-400' : ''}`} />
+              <Send className={`w-5 h-5 ${activePage === 'campaigns' ? 'text-[var(--wt-brand-300)]' : ''}`} />
               Campagnes Outreach
             </div>
           </li>
           <li>
             <div 
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'settings' ? 'text-white bg-teal-600/20 border border-teal-500/20 shadow-inner' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer font-medium text-sm transition-all duration-200 ${activePage === 'settings' ? 'text-white bg-white/10' : 'text-[var(--wt-rail-fg)] hover:text-white hover:bg-white/5'}`}
               onClick={() => { setActivePage('settings'); setMobileMenuOpen(false); }}
             >
-              <SettingsIcon className={`w-5 h-5 ${activePage === 'settings' ? 'text-teal-400' : ''}`} />
+              <SettingsIcon className={`w-5 h-5 ${activePage === 'settings' ? 'text-[var(--wt-brand-300)]' : ''}`} />
               Configurations
             </div>
           </li>
         </ul>
 
         {/* User Card & Logout */}
-        <div className="mt-auto border-t border-slate-800 pt-4">
-          <div className="flex items-center gap-3 px-2 py-2 rounded-lg bg-slate-950/40 mb-3 border border-slate-800/30">
-            <div className="w-8 h-8 rounded-full bg-teal-600 text-white font-bold flex items-center justify-center text-xs">
+        <div className="mt-auto border-t border-[var(--wt-rail-line)] pt-4">
+          <div className="flex items-center justify-between px-2 pb-3">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--wt-rail-fg)]">
+              Apparence
+            </span>
+            <ThemeToggle />
+          </div>
+          <div className="flex items-center gap-3 px-2 py-2 rounded-lg bg-black/20 mb-3 border border-[var(--wt-rail-line)]">
+            <div style={{ backgroundImage: 'var(--wt-gradient)' }} className="w-8 h-8 rounded-full text-white font-bold flex items-center justify-center text-xs shrink-0">
               {user.name ? user.name.slice(0, 2).toUpperCase() : 'US'}
             </div>
             <div className="truncate">
               <p className="text-xs font-semibold text-white truncate">{user.name}</p>
-              <p className="text-[10px] text-slate-500 truncate">{user.role}</p>
+              <p className="text-[10px] text-[var(--wt-rail-fg)] truncate">{user.role}</p>
             </div>
           </div>
           
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 rounded-lg cursor-pointer transition-all"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[var(--wt-rail-fg)] hover:text-[var(--wt-danger)] hover:bg-[var(--wt-danger)]/10 border border-transparent hover:border-[var(--wt-danger)]/20 rounded-lg cursor-pointer transition-all"
           >
             <LogOut className="w-4 h-4" />
             Se déconnecter
@@ -417,15 +424,15 @@ export default function App() {
         </div>
 
         {/* Footer brand indicator */}
-        <div className="border-t border-slate-800 pt-4 mt-3 pl-2">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-heading">
+        <div className="border-t border-[var(--wt-rail-line)] pt-4 mt-3 pl-2">
+          <p className="text-[10px] text-fg-muted font-bold uppercase tracking-wider font-display">
             Développé par
           </p>
           <a 
             href="https://www.witechagency.com" 
             target="_blank" 
             rel="noreferrer" 
-            className="text-xs text-teal-400 hover:text-teal-300 font-semibold flex items-center gap-1.5 mt-1 transition-colors"
+            className="text-xs text-[var(--wt-brand-300)] hover:text-white font-semibold flex items-center gap-1.5 mt-1 transition-colors"
           >
             Wi'Tech Agency
             <Globe className="w-3 h-3" />
@@ -434,11 +441,11 @@ export default function App() {
       </div>
 
       {/* Main Panel Content Render */}
-      <div className="flex-grow p-6 lg:p-10 w-full min-h-screen bg-slate-50 mt-14 lg:mt-0 overflow-x-hidden">
+      <div className="flex-grow p-6 lg:p-10 w-full min-h-screen bg-surface-2 mt-14 lg:mt-0 overflow-x-hidden">
         {loading ? (
-          <div className="flex flex-col items-center justify-center min-h-[70vh] text-slate-500">
-            <Zap className="w-12 h-12 text-teal-500 animate-bounce mb-4" />
-            <p className="text-sm font-heading font-medium tracking-wide">Initialisation de l'écosystème Witech Lead...</p>
+          <div className="flex flex-col items-center justify-center min-h-[70vh] text-fg-muted">
+            <Zap className="w-12 h-12 text-accent animate-bounce mb-4" />
+            <p className="text-sm font-display font-medium tracking-wide">Initialisation de l'écosystème Witech Lead...</p>
           </div>
         ) : (
           renderActivePage()
@@ -447,32 +454,32 @@ export default function App() {
 
       {/* Optional Phone Onboarding Modal */}
       {showPhonePrompt && (
-        <div className="fixed inset-0 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm z-[999] p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl max-w-md w-full animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center gap-2 mb-4 text-teal-600">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-teal-500/10 shadow-sm">
-                <Smartphone className="w-5 h-5 text-teal-600" />
+        <div className="fixed inset-0 flex items-center justify-center bg-[var(--wt-rail-bg)]/60 backdrop-blur-sm z-[999] p-4">
+          <div className="bg-surface border border-line rounded-2xl p-6 shadow-2xl max-w-md w-full animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-2 mb-4 text-accent">
+              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 shadow-sm">
+                <Smartphone className="w-5 h-5 text-accent" />
               </div>
               <div>
-                <h3 className="font-heading font-extrabold text-slate-900 text-lg">Onboarding : Profil</h3>
-                <p className="text-slate-500 text-xs mt-0.5">Complétez votre compte</p>
+                <h3 className="font-display font-extrabold text-fg text-lg">Onboarding : Profil</h3>
+                <p className="text-fg-muted text-xs mt-0.5">Complétez votre compte</p>
               </div>
             </div>
             
-            <p className="text-slate-600 text-sm mb-4 leading-relaxed">
+            <p className="text-fg-muted text-sm mb-4 leading-relaxed">
               Ajoutez votre numéro de téléphone afin que vos campagnes de prospection (SMS, signatures) puissent y faire référence dynamiquement !
             </p>
 
             {promptError && (
-              <p className="bg-red-50 text-red-600 text-xs p-3 rounded-lg font-semibold mb-4 border border-red-100">{promptError}</p>
+              <p className="bg-[var(--wt-danger-soft)] text-[var(--wt-danger)] text-xs p-3 rounded-lg font-semibold mb-4 border border-line">{promptError}</p>
             )}
 
             <form onSubmit={handleSavePhonePrompt} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Numéro de téléphone</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Numéro de téléphone</label>
                 <input 
                   type="tel" 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                  className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                   value={promptPhone}
                   onChange={(e) => setPromptPhone(e.target.value)}
                   placeholder="Ex: +33 6 12 34 56 78"
@@ -483,7 +490,7 @@ export default function App() {
               <div className="flex justify-end gap-3 pt-2">
                 <button 
                   type="button" 
-                  className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all"
+                  className="px-4 py-2.5 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2 active:scale-95 transition-all"
                   onClick={handleSkipPhonePrompt}
                   disabled={promptSaving}
                 >
@@ -491,7 +498,7 @@ export default function App() {
                 </button>
                 <button 
                   type="submit" 
-                  className="px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all shadow-sm shadow-teal-600/15"
+                  className="px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all shadow-sm shadow-teal-600/15"
                   disabled={promptSaving || !promptPhone.trim()}
                 >
                   {promptSaving ? 'Enregistrement...' : 'Enregistrer'}

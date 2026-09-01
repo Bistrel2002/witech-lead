@@ -102,28 +102,28 @@ export default function TeamSpace({ apiHost }) {
   // PASSWORD GATE VIEW (Secure Slate Blue HUD)
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4 font-sans text-slate-100">
-        <div className="max-w-md w-full space-y-6 bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl">
+      <div className="min-h-screen flex items-center justify-center bg-[var(--wt-rail-bg)] px-4 font-sans text-[var(--wt-rail-fg)]">
+        <div className="max-w-md w-full space-y-6 bg-white/5 border border-[var(--wt-rail-line)] p-8 rounded-2xl shadow-2xl">
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-500/10 text-blue-400 mb-4 border border-blue-500/20">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-accent/10 text-accent mb-4 border border-accent/20">
               <Users className="w-6 h-6" />
             </div>
             <h2 className="text-2xl font-bold tracking-tight text-white">Espace Collaborateurs</h2>
-            <p className="mt-2 text-sm text-slate-400">
+            <p className="mt-2 text-sm text-fg-subtle">
               Veuillez saisir le mot de passe d'équipe pour accéder à la console
             </p>
           </div>
 
           {authError && (
-            <div className="bg-red-950/40 border border-red-800 text-red-200 p-3 rounded-lg text-sm flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 shrink-0 text-red-500" />
+            <div className="bg-[var(--wt-danger-soft)]/40 border border-[var(--wt-danger)] text-[var(--wt-danger-fg)] p-3 rounded-lg text-sm flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-[var(--wt-danger)]" />
               <span>{authError}</span>
             </div>
           )}
 
           <form onSubmit={handleVerifyPassword} className="space-y-4">
             <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-fg-muted">
                 <Lock className="w-5 h-5" />
               </span>
               <input
@@ -131,7 +131,7 @@ export default function TeamSpace({ apiHost }) {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/80 transition-all placeholder:text-slate-700"
+                className="w-full pl-10 pr-3 py-2.5 bg-[var(--wt-rail-bg)] border border-[var(--wt-rail-line)] rounded-lg text-[var(--wt-rail-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent/80 transition-all placeholder:text-fg"
                 placeholder="Mot de passe d'équipe"
               />
             </div>
@@ -139,14 +139,14 @@ export default function TeamSpace({ apiHost }) {
             <button
               type="submit"
               disabled={verifying}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-accent hover:bg-accent text-white font-semibold text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer disabled:opacity-50"
             >
               {verifying ? 'Vérification...' : 'Déverrouiller la Console'}
             </button>
           </form>
 
           <div className="text-center">
-            <a href="/" className="text-xs text-slate-500 hover:text-slate-400 transition-colors">Retour à l'accueil</a>
+            <a href="/" className="text-xs text-fg-muted hover:text-fg-subtle transition-colors">Retour à l'accueil</a>
           </div>
         </div>
       </div>
@@ -155,30 +155,30 @@ export default function TeamSpace({ apiHost }) {
 
   // MAIN TEAM VIEW
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans p-6 lg:p-10">
+    <div className="min-h-screen bg-surface-2 text-fg font-sans p-6 lg:p-10">
       
       {/* Top Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-6 mb-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-line pb-6 mb-8">
         <div>
-          <div className="flex items-center gap-2 text-slate-500 text-sm font-semibold uppercase tracking-wider">
-            <Users className="w-4 h-4 text-blue-500" />
+          <div className="flex items-center gap-2 text-fg-muted text-sm font-semibold uppercase tracking-wider">
+            <Users className="w-4 h-4 text-accent" />
             Espace Collaborateurs
           </div>
-          <h1 className="text-3xl font-heading font-extrabold text-slate-900 mt-1">
+          <h1 className="text-3xl font-display font-extrabold text-fg mt-1">
             Tableau de Bord Commercial
           </h1>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => { fetchStats(); fetchCampaigns(); }}
-            className="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
+            className="flex items-center gap-2 px-4 py-2 border border-line bg-surface hover:bg-surface-2 text-fg-muted text-sm font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4" />
             Actualiser
           </button>
           <button
             onClick={handlePortalLogout}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--wt-rail-bg)] hover:bg-white/5 text-white text-sm font-semibold rounded-lg shadow-sm cursor-pointer transition-all"
           >
             <LogOut className="w-4 h-4" />
             Quitter la Console
@@ -190,46 +190,46 @@ export default function TeamSpace({ apiHost }) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         
         {/* Total Prospects */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-accent-soft flex items-center justify-center text-accent">
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Prospects CRM</p>
-            <p className="text-2xl font-bold text-slate-900 mt-0.5">{stats.totalLeads}</p>
+            <p className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Prospects CRM</p>
+            <p className="text-2xl font-bold text-fg mt-0.5">{stats.totalLeads}</p>
           </div>
         </div>
 
         {/* Contacted */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
             <Target className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Prospects Contactés</p>
-            <p className="text-2xl font-bold text-slate-900 mt-0.5">{stats.contactedLeads}</p>
+            <p className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Prospects Contactés</p>
+            <p className="text-2xl font-bold text-fg mt-0.5">{stats.contactedLeads}</p>
           </div>
         </div>
 
         {/* Email Coverage Rate */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-accent-soft flex items-center justify-center text-accent">
             <Mail className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Couverture Emails</p>
-            <p className="text-2xl font-bold text-slate-900 mt-0.5">{stats.emailCoverageRate}%</p>
+            <p className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Couverture Emails</p>
+            <p className="text-2xl font-bold text-fg mt-0.5">{stats.emailCoverageRate}%</p>
           </div>
         </div>
 
         {/* Phone Coverage Rate */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-accent-soft flex items-center justify-center text-accent">
             <Phone className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Couverture Téléphones</p>
-            <p className="text-2xl font-bold text-slate-900 mt-0.5">{stats.phoneCoverageRate}%</p>
+            <p className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Couverture Téléphones</p>
+            <p className="text-2xl font-bold text-fg mt-0.5">{stats.phoneCoverageRate}%</p>
           </div>
         </div>
 
@@ -238,42 +238,42 @@ export default function TeamSpace({ apiHost }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Left Column: Campaigns progress */}
-        <div className="lg:col-span-2 bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
-          <h3 className="font-heading font-extrabold text-lg text-slate-900 mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-teal-500" />
+        <div className="lg:col-span-2 bg-surface border border-line rounded-2xl p-6 shadow-sm">
+          <h3 className="font-display font-extrabold text-lg text-fg mb-4 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-accent" />
             Campagnes Récentes d'Équipe
           </h3>
           
           {campaigns.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 text-sm">Aucune campagne active détectée.</div>
+            <div className="py-8 text-center text-fg-subtle text-sm">Aucune campagne active détectée.</div>
           ) : (
             <div className="space-y-4">
               {campaigns.map((c) => {
                 const progress = c.total_leads > 0 ? Math.round(((c.sent_count + c.failed_count) / c.total_leads) * 100) : 0;
                 return (
-                  <div key={c.id} className="p-4 border border-slate-200 rounded-xl hover:border-slate-300 transition-all">
+                  <div key={c.id} className="p-4 border border-line rounded-xl hover:border-line transition-all">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="font-bold text-slate-800 text-sm">{c.name}</h4>
-                        <p className="text-xs text-slate-400 mt-0.5">Template : {c.template_name} | Canal : {c.channel}</p>
+                        <h4 className="font-bold text-fg text-sm">{c.name}</h4>
+                        <p className="text-xs text-fg-subtle mt-0.5">Template : {c.template_name} | Canal : {c.channel}</p>
                       </div>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        c.status === 'Completed' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                        c.status === 'Active' ? 'bg-blue-50 text-blue-600 border border-blue-100 animate-pulse' :
-                        'bg-slate-100 text-slate-600'
+                        c.status === 'Completed' ? 'bg-[var(--wt-success-soft)] text-[var(--wt-success)] border border-line' :
+                        c.status === 'Active' ? 'bg-accent-soft text-accent border border-line animate-pulse' :
+                        'bg-surface-2 text-fg-muted'
                       }`}>
                         {c.status}
                       </span>
                     </div>
 
                     <div className="mt-4">
-                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                      <div className="flex justify-between text-xs text-fg-muted mb-1">
                         <span>Progression</span>
                         <span className="font-bold">{progress}% ({c.sent_count} envoyés / {c.total_leads} cibles)</span>
                       </div>
-                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                      <div className="w-full bg-surface-2 rounded-full h-1.5 overflow-hidden">
                         <div 
-                          className={`h-1.5 rounded-full ${c.status === 'Completed' ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                          className={`h-1.5 rounded-full ${c.status === 'Completed' ? 'bg-[var(--wt-success)]' : 'bg-accent'}`}
                           style={{ width: `${progress}%` }}
                         />
                       </div>
@@ -286,19 +286,19 @@ export default function TeamSpace({ apiHost }) {
         </div>
 
         {/* Right Column: Tips / Tools */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
-          <h3 className="font-heading font-extrabold text-lg text-slate-900 mb-4">Wi'Tech Team Guide</h3>
-          <ul className="space-y-4 text-sm text-slate-600">
+        <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm">
+          <h3 className="font-display font-extrabold text-lg text-fg mb-4">Wi'Tech Team Guide</h3>
+          <ul className="space-y-4 text-sm text-fg-muted">
             <li className="flex gap-2">
-              <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
+              <CheckCircle className="w-5 h-5 shrink-0 text-[var(--wt-success)] mt-0.5" />
               <span><strong>Dédoublonnage :</strong> Pensez à lancer le nettoyage périodique dans le gestionnaire principal pour garder la base CRM propre.</span>
             </li>
             <li className="flex gap-2">
-              <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
+              <CheckCircle className="w-5 h-5 shrink-0 text-[var(--wt-success)] mt-0.5" />
               <span><strong>Couverture de données :</strong> Utilisez de préférence la recherche hybride (Scrape Maps + Recherche Nationale) pour maximiser les emails détectés.</span>
             </li>
             <li className="flex gap-2">
-              <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
+              <CheckCircle className="w-5 h-5 shrink-0 text-[var(--wt-success)] mt-0.5" />
               <span><strong>Temporisation des envois :</strong> Les campagnes e-mail respectent un intervalle automatique de 5 secondes entre chaque message, pour préserver la réputation d'envoi du domaine.</span>
             </li>
           </ul>

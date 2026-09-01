@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
+  Send,
   Search, 
   Filter, 
   Globe, 
@@ -34,8 +35,56 @@ import {
   Play
 } from 'lucide-react';
 
+/* Where a prospect stands against the re-contact policy.
+ *
+ * Everything shown here is computed on the server (leads carry an `outreach`
+ * object): the interface must not restate a rule that lives in one place, or
+ * changing the cooldown means remembering to change it here too.
+ *
+ * Silent for a prospect never contacted — an empty pipeline covered in "0/2"
+ * badges is noise, and the absence of the badge already says it. */
+function OutreachBadge({ outreach, className = '' }) {
+  if (!outreach || outreach.attempts === 0) return null;
+
+  const { attempts, maxAttempts, daysUntilRecontact, eligible } = outreach;
+  const exhausted = attempts >= maxAttempts;
+
+  /* Prospects contacted before the policy existed can exceed the cap. "3/2"
+   * is accurate but reads as a broken counter, so past the cap the badge
+   * states the count plainly instead of pretending to be a ratio. */
+  const count = attempts > maxAttempts ? `${attempts} envois` : `${attempts}/${maxAttempts}`;
+
+  const detail = exhausted
+    ? 'quota atteint'
+    : eligible
+      ? 'relance possible'
+      : `relance dans ${daysUntilRecontact} j`;
+
+  return (
+    <span
+      title={`Contacté ${attempts} fois (maximum ${maxAttempts}) — ${detail}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5
+        text-3xs font-semibold ${
+          exhausted
+            ? 'bg-surface-2 text-fg-muted'
+            : eligible
+              ? 'bg-[var(--wt-success-soft)] text-[var(--wt-success-fg)]'
+              : 'bg-[var(--wt-warning-soft)] text-[var(--wt-warning-fg)]'
+        } ${className}`}
+    >
+      <Send className="w-3 h-3" />
+      {count}
+      <span className="font-normal opacity-90">· {detail}</span>
+    </span>
+  );
+}
+
 const PIPELINE_STATUSES = [
   'New',
+  // Set by the campaign runner when an email send found no address but the
+  // prospect still has a phone number. Not a stage of the sale: a bucket of
+  // work that needs a human rather than a send.
+  'Call Only',
   'Contacted',
   'Meeting Scheduled',
   'Proposal Sent',
@@ -798,19 +847,21 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
-      case 'New': return 'bg-slate-100 border-slate-200 text-slate-600';
-      case 'Contacted': return 'bg-blue-50 border-blue-200 text-blue-700';
-      case 'Meeting Scheduled': return 'bg-indigo-50 border-indigo-200 text-indigo-700';
-      case 'Proposal Sent': return 'bg-purple-50 border-purple-200 text-purple-700';
-      case 'Closed Won': return 'bg-emerald-50 border-emerald-200 text-emerald-700';
-      case 'Closed Lost': return 'bg-red-50 border-red-200 text-red-700';
-      default: return 'bg-slate-100 border-slate-200 text-slate-600';
+      case 'New': return 'bg-surface-2 border-line text-fg-muted';
+      case 'Call Only': return 'bg-[var(--wt-warning-soft)] border-line text-[var(--wt-warning-fg)]';
+      case 'Contacted': return 'bg-accent-soft border-line text-accent';
+      case 'Meeting Scheduled': return 'bg-accent-soft border-line text-accent';
+      case 'Proposal Sent': return 'bg-accent-soft border-line text-accent';
+      case 'Closed Won': return 'bg-[var(--wt-success-soft)] border-line text-[var(--wt-success-fg)]';
+      case 'Closed Lost': return 'bg-[var(--wt-danger-soft)] border-line text-[var(--wt-danger-fg)]';
+      default: return 'bg-surface-2 border-line text-fg-muted';
     }
   };
 
   const getStatusLabel = (status) => {
     const labels = {
       'New': 'Nouveau',
+      'Call Only': 'Appel uniquement',
       'Contacted': 'Contacté',
       'Meeting Scheduled': 'RDV Planifié',
       'Proposal Sent': 'Devis Envoyé',
@@ -823,7 +874,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const getVulnFlags = (lead) => {
     const flags = [];
     if (!lead.website || lead.website.trim() === '') {
-      flags.push({ label: 'Pas de Site', cls: 'bg-red-50 text-red-700 border-red-200', icon: Globe });
+      flags.push({ label: 'Pas de Site', cls: 'bg-[var(--wt-danger-soft)] text-[var(--wt-danger-fg)] border-line', icon: Globe });
     }
     return flags;
   };
@@ -834,24 +885,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       {/* Page Header */}
       <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-heading font-extrabold text-slate-800">Gestionnaire de Prospects</h2>
-          <p className="text-slate-500 text-sm mt-1">
+          <h2 className="text-2xl font-display font-extrabold text-fg">Gestionnaire de Prospects</h2>
+          <p className="text-fg-muted text-sm mt-1">
             Importez, qualifiez vos cibles et pilotez votre CRM prospection.
           </p>
         </div>
         
         <div className="flex flex-wrap items-center gap-2.5">
           {/* View Toggle */}
-          <div className="flex bg-slate-200/80 p-1 rounded-xl border border-slate-300/40">
+          <div className="flex bg-line/80 p-1 rounded-xl border border-line/40">
             <button 
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'board' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'board' ? 'bg-accent text-white shadow-sm' : 'text-fg-muted hover:text-fg'}`}
               onClick={() => setViewMode('board')}
             >
               <Kanban className="w-3.5 h-3.5" />
               Pipeline
             </button>
             <button 
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'list' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${viewMode === 'list' ? 'bg-accent text-white shadow-sm' : 'text-fg-muted hover:text-fg'}`}
               onClick={() => setViewMode('list')}
             >
               <LayoutList className="w-3.5 h-3.5" />
@@ -860,19 +911,19 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           </div>
 
           {selectedLeadIds.length > 0 && (
-            <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-semibold text-xs transition-colors" onClick={() => handleDeleteLeads(selectedLeadIds)}>
+            <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-[var(--wt-danger-soft)] hover:bg-[var(--wt-danger-soft)] border border-line text-[var(--wt-danger-fg)] font-semibold text-xs transition-colors" onClick={() => handleDeleteLeads(selectedLeadIds)}>
               <Trash2 className="w-4 h-4" />
               Supprimer ({selectedLeadIds.length})
             </button>
           )}
 
-          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-colors" onClick={handleExportCSV} disabled={filteredLeads.length === 0}>
+          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs shadow-sm hover:bg-surface-2 transition-colors" onClick={handleExportCSV} disabled={filteredLeads.length === 0}>
             <Download className="w-4 h-4" />
             Exporter CSV
           </button>
           
           <button 
-            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs shadow-sm hover:bg-surface-2 transition-colors"
             onClick={() => {
               setImportStep(1); setUploadedFileName(''); setParsedHeaders([]); setParsedRows([]); setColumnMappings({}); setImportError(''); setShowImportModal(true);
             }}
@@ -882,15 +933,15 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           </button>
 
           <button 
-            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold text-xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-[var(--wt-warning-soft)] hover:bg-[var(--wt-warning-soft)] border border-line text-[var(--wt-warning-fg)] font-semibold text-xs transition-colors"
             onClick={handleCleanDuplicates}
             disabled={actionInProgress}
           >
-            <Sparkles className="w-4 h-4 text-amber-600" />
+            <Sparkles className="w-4 h-4 text-[var(--wt-warning)]" />
             Nettoyer Doublons
           </button>
 
-          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-sm hover:bg-teal-700 transition-colors" onClick={() => setShowAddModal(true)}>
+          <button className="inline-flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-accent text-white font-semibold text-xs shadow-sm hover:bg-accent transition-colors" onClick={() => setShowAddModal(true)}>
             <Plus className="w-4 h-4" />
             Créer
           </button>
@@ -898,28 +949,28 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       </div>
 
       {/* PROSPECTING SEARCH WIZARD */}
-      <div className="bg-teal-50/20 border border-teal-500/15 rounded-2xl p-6">
-        <h4 className="font-heading font-extrabold text-teal-800 text-sm mb-1.5 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-teal-600" />
+      <div className="bg-accent-soft/20 border border-accent/15 rounded-2xl p-6">
+        <h4 className="font-display font-extrabold text-accent text-sm mb-1.5 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-accent" />
           Extraction Intelligente de Prospects (Google Maps & Base de Données France)
         </h4>
-        <p className="text-slate-500 text-xs mb-5">
+        <p className="text-fg-muted text-xs mb-5">
           Sélectionnez votre source de données, affinez le ciblage géographique et planifiez la qualification immédiate des entreprises.
         </p>
         
         <form onSubmit={handleLaunchProspecting} className="space-y-4">
           {/* Source Options Toggle */}
-          <div className="flex gap-2 max-w-md bg-slate-200/40 p-1 rounded-lg border border-slate-200/60 text-2xs font-bold text-slate-600">
+          <div className="flex gap-2 max-w-md bg-line/40 p-1 rounded-lg border border-line/60 text-2xs font-bold text-fg-muted">
             <button 
               type="button" 
-              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'maps' ? 'bg-white text-slate-800 shadow-sm' : 'hover:text-slate-800'}`}
+              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'maps' ? 'bg-surface text-fg shadow-sm' : 'hover:text-fg'}`}
               onClick={() => { setScrapeSource('maps'); setUseRawLink(false); }}
             >
               Google Maps (Direct)
             </button>
             <button 
               type="button" 
-              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'database' ? 'bg-white text-slate-800 shadow-sm' : 'hover:text-slate-800'}`}
+              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'database' ? 'bg-surface text-fg shadow-sm' : 'hover:text-fg'}`}
               onClick={() => { setScrapeSource('database'); setUseRawLink(false); }}
             >
               Base Nationale (France CSV)
@@ -929,18 +980,18 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           {!useRawLink ? (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
               <div className={scrapeSource === 'maps' ? 'md:col-span-3' : 'md:col-span-5'}>
-                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Catégorie recherchée</label>
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Catégorie recherchée</label>
                 <input 
-                  type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  type="text" className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                   placeholder="Ex: Plombier, Menuisier, Electricien..."
                   value={searchCategory} onChange={(e) => setSearchCategory(e.target.value)}
                   required={!useRawLink}
                 />
               </div>
               <div className={scrapeSource === 'maps' ? 'md:col-span-3' : 'md:col-span-5'}>
-                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Ville cible</label>
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Ville cible</label>
                 <input 
-                  type="text" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  type="text" className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                   placeholder="Ex: Nantes, Lyon, Bordeaux..."
                   value={searchCity} onChange={(e) => setSearchCity(e.target.value)}
                   required={!useRawLink}
@@ -949,17 +1000,17 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               {scrapeSource === 'maps' && (
                 <>
                   <div className="md:col-span-2">
-                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Rayon (km)</label>
+                    <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Rayon (km)</label>
                     <input 
-                      type="number" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                      type="number" className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                       min="1" max="50"
                       value={searchRadius} onChange={(e) => setSearchRadius(parseInt(e.target.value) || 5)}
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Leads</label>
+                    <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Max Leads</label>
                     <select
-                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                      className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                       value={maxLeads} onChange={(e) => setMaxLeads(parseInt(e.target.value))}
                     >
                       <option value={50}>50</option>
@@ -973,7 +1024,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </>
               )}
               <div className="md:col-span-2 flex items-end">
-                <button type="submit" className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
+                <button type="submit" className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all" disabled={mapsScraping}>
                   {mapsScraping ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
                   Lancer
                 </button>
@@ -982,11 +1033,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           ) : (
             <div className="flex flex-col sm:flex-row gap-3 items-end">
               <div className="flex-1 relative w-full">
-                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Lien Google Maps</label>
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Lien Google Maps</label>
                 <div className="relative">
-                  <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle" />
                   <input 
-                    type="url" className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                    type="url" className="w-full bg-surface border border-line rounded-xl pl-10 pr-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                     placeholder="Collez le lien Google Maps complet ici..."
                     value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)}
                     required={useRawLink}
@@ -994,9 +1045,9 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </div>
               </div>
               <div className="w-full sm:w-32">
-                <label className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Leads</label>
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Max Leads</label>
                 <select
-                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-xs focus:outline-none focus:border-teal-500"
+                  className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
                   value={maxLeads} onChange={(e) => setMaxLeads(parseInt(e.target.value))}
                 >
                   <option value={50}>50</option>
@@ -1007,17 +1058,17 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   <option value={500}>500</option>
                 </select>
               </div>
-              <button type="submit" className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all" disabled={mapsScraping}>
+              <button type="submit" className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all" disabled={mapsScraping}>
                 {mapsScraping ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Scraper'}
               </button>
             </div>
           )}
 
           {/* Scraper Advanced settings: DB vs Campaign Routing */}
-          <div className="flex flex-wrap gap-5 items-center pt-2 text-xs text-slate-600 border-t border-slate-200/40">
+          <div className="flex flex-wrap gap-5 items-center pt-2 text-xs text-fg-muted border-t border-line/40">
             <label className="inline-flex items-center gap-2 cursor-pointer font-medium">
               <input 
-                type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 w-3.5 h-3.5 border-slate-300"
+                type="checkbox" className="rounded text-accent focus:ring-accent w-3.5 h-3.5 border-line"
                 checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)}
               />
               Enregistrer dans le CRM global (Base locale)
@@ -1026,7 +1077,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             <div className="flex items-center gap-2">
               <span className="font-medium">Associer directement à une campagne :</span>
               <select
-                className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none"
+                className="bg-surface border border-line rounded-lg px-2 py-1 text-xs text-fg focus:outline-none"
                 value={targetCampaignId} onChange={(e) => setTargetCampaignId(e.target.value)}
                 required={!saveToDb}
               >
@@ -1039,7 +1090,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
             {scrapeSource === 'maps' && (
               <button 
-                type="button" className="text-teal-600 hover:text-teal-700 font-semibold text-3xs uppercase tracking-wider ml-auto"
+                type="button" className="text-accent hover:text-accent font-semibold text-3xs uppercase tracking-wider ml-auto"
                 onClick={() => setUseRawLink(!useRawLink)}
               >
                 {useRawLink ? "Rechercher par catégorie/ville" : "Importer via lien maps brut"}
@@ -1049,21 +1100,21 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         </form>
 
         {mapsScraping && (
-          <div className="mt-4 p-4 bg-teal-50 border border-teal-200/50 rounded-xl space-y-2">
-            <div className="flex justify-between items-center text-xs font-bold text-teal-800">
+          <div className="mt-4 p-4 bg-accent-soft border border-accent/50 rounded-xl space-y-2">
+            <div className="flex justify-between items-center text-xs font-bold text-accent">
               <span className="inline-flex items-center gap-1.5">
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
                 </span>
                 Robot d'extraction et audit actif
               </span>
-              <span className="text-slate-400">{scrapingSeconds}s</span>
+              <span className="text-fg-subtle">{scrapingSeconds}s</span>
             </div>
-            <p className="text-xs text-slate-700 font-medium">{getScrapingProgressMessage()}</p>
-            <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden">
+            <p className="text-xs text-fg font-medium">{getScrapingProgressMessage()}</p>
+            <div className="w-full h-1.5 bg-line/60 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-teal-600 transition-all duration-300"
+                className="h-full bg-accent transition-all duration-300"
                 style={{ width: `${Math.min(95, (scrapingSeconds / 75) * 100)}%` }}
               ></div>
             </div>
@@ -1072,13 +1123,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       </div>
 
       {/* VULNERABILITY METRIC FLAGS SUMMARY */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
         <div className="flex flex-wrap gap-4 items-center text-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-[10px] font-bold text-fg-subtle uppercase tracking-wider">
             Indicateurs de faiblesses CRM
           </span>
           <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-red-50 text-red-700 border border-red-100">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-semibold bg-[var(--wt-danger-soft)] text-[var(--wt-danger-fg)] border border-line">
               <Globe className="w-3 h-3" />
               {vulnMetrics.noWebsite} sans site
             </span>
@@ -1089,13 +1140,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       {/* STRICT CATEGORY TAB BAR */}
       <div className="space-y-3">
         <div className="flex justify-between items-center gap-4 flex-wrap">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-[10px] font-bold text-fg-subtle uppercase tracking-wider">
             Filtrer par Secteur d'activité
           </span>
           <div className="relative w-52">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-subtle" />
             <input 
-              type="text" className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:border-teal-500"
+              type="text" className="w-full bg-surface border border-line rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:border-accent"
               placeholder="Rechercher un secteur..."
               value={categorySearchTerm} onChange={(e) => setCategorySearchTerm(e.target.value)}
             />
@@ -1103,7 +1154,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <button 
-            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === 'All' ? 'bg-slate-900 border-slate-950 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === 'All' ? 'bg-[var(--wt-rail-bg)] border-[var(--wt-rail-line)] text-white shadow-sm' : 'bg-surface border-line text-fg-muted hover:bg-surface-2'}`}
             onClick={() => { setActiveCategoryTab('All'); setSelectedLeadIds([]); }}
           >
             Tous ({leads.length})
@@ -1114,7 +1165,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             return (
               <button 
                 key={cat}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === cat ? 'bg-teal-600 border-teal-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${activeCategoryTab === cat ? 'bg-accent border-accent text-white shadow-sm' : 'bg-surface border-line text-fg-muted hover:bg-surface-2'}`}
                 onClick={() => { setActiveCategoryTab(cat); setSelectedLeadIds([]); }}
               >
                 {cat} ({count})
@@ -1125,19 +1176,19 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       </div>
 
       {/* Advanced Filters Panel */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           <div className="sm:col-span-2 relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle" />
             <input 
-              type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 text-sm focus:outline-none focus:border-teal-500"
+              type="text" className="w-full bg-surface-2 border border-line rounded-xl pl-10 pr-4 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
               placeholder="Rechercher nom, ville, adresse..." 
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <div>
             <select 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
               value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
             >
               <option value="All">Tous les Statuts</option>
@@ -1148,7 +1199,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           </div>
           <div>
             <select 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
               value={emailFilter} onChange={(e) => setEmailFilter(e.target.value)}
             >
               <option value="All">Email : Tous</option>
@@ -1158,7 +1209,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           </div>
           <div>
             <select 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 text-sm focus:outline-none focus:border-teal-500"
+              className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
               value={websiteFilter} onChange={(e) => setWebsiteFilter(e.target.value)}
             >
               <option value="All">Site : Tous</option>
@@ -1178,18 +1229,18 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             return (
               <div 
                 key={status} 
-                className={`flex-shrink-0 w-72 rounded-2xl p-4 flex flex-col gap-3 border transition-all duration-200 ${isDragOver ? 'bg-teal-50/70 border-teal-500 shadow-inner' : 'bg-slate-100/60 border-slate-200/80'}`}
+                className={`flex-shrink-0 w-72 rounded-2xl p-4 flex flex-col gap-3 border transition-all duration-200 ${isDragOver ? 'bg-accent-soft/70 border-accent shadow-inner' : 'bg-surface-2/60 border-line/80'}`}
                 onDragOver={(e) => { e.preventDefault(); if (dragOverStatus !== status) setDragOverStatus(status); }}
                 onDragLeave={() => setDragOverStatus(null)}
                 onDrop={(e) => handleDrop(e, status)}
               >
                 {/* Column Header */}
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200 mb-1">
+                <div className="flex justify-between items-center pb-2 border-b border-line mb-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <span className="text-xs font-bold text-fg uppercase tracking-wider">
                       {getStatusLabel(status)}
                     </span>
-                    <span className="text-2xs bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                    <span className="text-2xs bg-line/80 text-fg-muted px-2 py-0.5 rounded-full font-bold">
                       {columnLeads.length}
                     </span>
                   </div>
@@ -1205,20 +1256,22 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                         draggable
                         onDragStart={(e) => handleDragStart(e, lead.id)}
                         onDragEnd={handleDragEnd}
-                        className={`bg-white border border-slate-200 rounded-xl p-4 cursor-grab active:cursor-grabbing hover:shadow-md hover:border-teal-500 hover:-translate-y-0.5 transition-all duration-200 flex flex-col gap-3 ${isDragged ? 'opacity-40' : 'opacity-100'}`}
+                        className={`bg-surface border border-line rounded-xl p-4 cursor-grab active:cursor-grabbing hover:shadow-md hover:border-accent hover:-translate-y-0.5 transition-all duration-200 flex flex-col gap-3 ${isDragged ? 'opacity-40' : 'opacity-100'}`}
                         onClick={() => setActiveLeadDetails(lead)}
                       >
                         <div>
-                          <strong className="text-slate-800 text-sm block mb-1 group-hover:text-teal-600 transition-colors leading-tight">
+                          <strong className="text-fg text-sm block mb-1 group-hover:text-accent transition-colors leading-tight">
                             {lead.name}
                           </strong>
-                          <span className="inline-block bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2 py-0.5 text-3xs font-semibold">
+                          <span className="inline-block bg-accent-soft text-accent border border-line rounded-full px-2 py-0.5 text-3xs font-semibold">
                             {lead.category}
                           </span>
                         </div>
 
+                        <OutreachBadge outreach={lead.outreach} />
+
                         {lead.city && (
-                          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                          <div className="flex items-center gap-1 text-[11px] text-fg-muted">
                             <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
                             <span>{lead.city}</span>
                           </div>
@@ -1226,24 +1279,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
                         {lead.rating && (
                           <div className="flex items-center gap-1">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 stroke-amber-400" />
-                            <span className="text-xs font-bold text-amber-500">{lead.rating}</span>
-                            <span className="text-3xs text-slate-400">({lead.review_count})</span>
+                            <Star className="w-3.5 h-3.5 fill-[var(--wt-warning)] stroke-[var(--wt-warning)]" />
+                            <span className="text-xs font-bold text-[var(--wt-warning)]">{lead.rating}</span>
+                            <span className="text-3xs text-fg-subtle">({lead.review_count})</span>
                           </div>
                         )}
 
-                        <div className="flex justify-between items-center border-t border-slate-100 pt-2.5 mt-1">
-                          <div className="flex gap-2 text-slate-400">
-                            <Globe className={`w-3.5 h-3.5 ${lead.website ? 'text-teal-500' : 'text-slate-200'}`} />
-                            <Mail className={`w-3.5 h-3.5 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
-                            <Phone className={`w-3.5 h-3.5 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
+                        <div className="flex justify-between items-center border-t border-line pt-2.5 mt-1">
+                          <div className="flex gap-2 text-fg-subtle">
+                            <Globe className={`w-3.5 h-3.5 ${lead.website ? 'text-accent' : 'text-[var(--wt-rail-fg)]'}`} />
+                            <Mail className={`w-3.5 h-3.5 ${lead.email ? 'text-[var(--wt-success)]' : 'text-[var(--wt-rail-fg)]'}`} />
+                            <Phone className={`w-3.5 h-3.5 ${lead.phone ? 'text-[var(--wt-warning)]' : 'text-[var(--wt-rail-fg)]'}`} />
                           </div>
                         </div>
                       </div>
                     );
                   })}
                   {columnLeads.length === 0 && (
-                    <div className="py-8 text-center text-slate-400 text-3xs border border-dashed border-slate-300/60 rounded-xl bg-slate-50/50">
+                    <div className="py-8 text-center text-fg-subtle text-3xs border border-dashed border-line/60 rounded-xl bg-surface-2/50">
                       Déposez les prospects ici
                     </div>
                   )}
@@ -1253,21 +1306,21 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           })}
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-surface border border-line rounded-2xl shadow-sm overflow-hidden">
           {filteredLeads.length === 0 ? (
-            <div className="text-center py-16 text-slate-400 space-y-2">
-              <AlertTriangle className="w-12 h-12 mx-auto opacity-30 text-teal-600" />
-              <h4 className="font-heading font-bold text-slate-700">Aucun prospect dans cette section</h4>
+            <div className="text-center py-16 text-fg-subtle space-y-2">
+              <AlertTriangle className="w-12 h-12 mx-auto opacity-30 text-accent" />
+              <h4 className="font-display font-bold text-fg">Aucun prospect dans cette section</h4>
               <p className="text-xs">Lancez une recherche ci-dessus pour peupler la liste.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold text-xs uppercase tracking-wider">
+                  <tr className="bg-surface-2 border-b border-line text-fg-subtle font-semibold text-xs uppercase tracking-wider">
                     <th className="p-4 w-10 text-center">
                       <input 
-                        type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 border-slate-300"
+                        type="checkbox" className="rounded text-accent focus:ring-accent border-line"
                         onChange={handleSelectAll} 
                         checked={filteredLeads.length > 0 && selectedLeadIds.length === filteredLeads.length}
                       />
@@ -1281,43 +1334,46 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-line text-fg">
                   {filteredLeads.map((lead) => {
                     return (
-                      <tr key={lead.id} className={`hover:bg-slate-50/50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-teal-50/20' : ''}`}>
+                      <tr key={lead.id} className={`hover:bg-surface-2/50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-accent-soft/20' : ''}`}>
                         <td className="p-4 text-center">
                           <input 
-                            type="checkbox" className="rounded text-teal-600 focus:ring-teal-500 border-slate-300"
+                            type="checkbox" className="rounded text-accent focus:ring-accent border-line"
                             checked={selectedLeadIds.includes(lead.id)}
                             onChange={() => handleSelectLead(lead.id)}
                           />
                         </td>
-                        <td className="p-4 font-bold text-slate-800">{lead.name}</td>
+                        <td className="p-4 font-bold text-fg">{lead.name}</td>
                         <td className="p-4">
-                          <span className="inline-block bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2.5 py-0.5 text-2xs font-semibold">
-                            {lead.category}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-block bg-accent-soft text-accent border border-line rounded-full px-2.5 py-0.5 text-2xs font-semibold">
+                              {lead.category}
+                            </span>
+                            <OutreachBadge outreach={lead.outreach} />
+                          </div>
                         </td>
-                        <td className="p-4 text-slate-500">
+                        <td className="p-4 text-fg-muted">
                           <span className="inline-flex items-center gap-1 text-xs">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <MapPin className="w-3.5 h-3.5 text-fg-subtle" />
                             {lead.city || '—'}
                           </span>
                         </td>
                         <td className="p-4">
                           {lead.rating ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs text-amber-500 font-bold">
-                              <Star className="w-3.5 h-3.5 fill-amber-400 stroke-amber-400" />
+                            <span className="inline-flex items-center gap-1.5 text-xs text-[var(--wt-warning)] font-bold">
+                              <Star className="w-3.5 h-3.5 fill-[var(--wt-warning)] stroke-[var(--wt-warning)]" />
                               {lead.rating}
-                              <span className="text-3xs text-slate-400 font-normal">({lead.review_count || 0})</span>
+                              <span className="text-3xs text-fg-subtle font-normal">({lead.review_count || 0})</span>
                             </span>
                           ) : '—'}
                         </td>
                         <td className="p-4">
-                          <div className="flex gap-2 text-slate-400">
-                            <Globe className={`w-4 h-4 ${lead.website ? 'text-teal-500' : 'text-slate-200'}`} />
-                            <Mail className={`w-4 h-4 ${lead.email ? 'text-emerald-500' : 'text-slate-200'}`} />
-                            <Phone className={`w-4 h-4 ${lead.phone ? 'text-amber-500' : 'text-slate-200'}`} />
+                          <div className="flex gap-2 text-fg-subtle">
+                            <Globe className={`w-4 h-4 ${lead.website ? 'text-accent' : 'text-[var(--wt-rail-fg)]'}`} />
+                            <Mail className={`w-4 h-4 ${lead.email ? 'text-[var(--wt-success)]' : 'text-[var(--wt-rail-fg)]'}`} />
+                            <Phone className={`w-4 h-4 ${lead.phone ? 'text-[var(--wt-warning)]' : 'text-[var(--wt-rail-fg)]'}`} />
                           </div>
                         </td>
                         <td className="p-4">
@@ -1329,22 +1385,22 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                           <div className="inline-flex gap-2">
                             {lead.website && !lead.email && (
                               <button 
-                                className="p-1.5 text-slate-400 hover:text-teal-600 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors"
+                                className="p-1.5 text-fg-subtle hover:text-accent rounded-lg hover:bg-surface-2 border border-line transition-colors"
                                 onClick={() => handleScrapeContactInfo(lead.id)}
                                 disabled={scrapingLeadId === lead.id}
                                 title="Lancer l'audit digital"
                               >
                                 {scrapingLeadId === lead.id ? (
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" />
                                 ) : (
-                                  <Globe className="w-3.5 h-3.5 text-teal-500" />
+                                  <Globe className="w-3.5 h-3.5 text-accent" />
                                 )}
                               </button>
                             )}
-                            <button className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors" onClick={() => setActiveLeadDetails(lead)}>
+                            <button className="p-1.5 text-fg-subtle hover:text-fg rounded-lg hover:bg-surface-2 border border-line transition-colors" onClick={() => setActiveLeadDetails(lead)}>
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            <button className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 border border-slate-200 transition-colors" onClick={() => handleDeleteLeads([lead.id])}>
+                            <button className="p-1.5 text-[var(--wt-danger)] hover:text-[var(--wt-danger)] rounded-lg hover:bg-[var(--wt-danger-soft)] border border-line transition-colors" onClick={() => handleDeleteLeads([lead.id])}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -1362,83 +1418,83 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       {/* Modal: Create manual lead */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out]">
-            <div className="flex justify-between items-center p-5 border-b border-slate-100">
-              <h3 className="font-heading font-extrabold text-slate-800 text-lg">Ajouter un Prospect Manuel</h3>
-              <button className="text-slate-400 hover:text-slate-600" onClick={() => setShowAddModal(false)}>
+          <div className="w-full max-w-lg bg-surface border border-line rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out]">
+            <div className="flex justify-between items-center p-5 border-b border-line">
+              <h3 className="font-display font-extrabold text-fg text-lg">Ajouter un Prospect Manuel</h3>
+              <button className="text-fg-subtle hover:text-fg-muted" onClick={() => setShowAddModal(false)}>
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleAddLeadSubmit}>
               <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nom de l'entreprise *</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Nom de l'entreprise *</label>
                   <input 
-                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                    type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                     value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catégorie *</label>
+                    <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Catégorie *</label>
                     <input 
-                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all" required
+                      type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all" required
                       value={newLead.category} onChange={(e) => setNewLead({ ...newLead, category: e.target.value })}
                       placeholder="Ex: Plombier, Menuisier..."
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ville</label>
+                    <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Ville</label>
                     <input 
-                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                       value={newLead.city} onChange={(e) => setNewLead({ ...newLead, city: e.target.value })}
                       placeholder="Ex: Paris"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Adresse</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Adresse</label>
                   <input 
-                    type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                    type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     value={newLead.address} onChange={(e) => setNewLead({ ...newLead, address: e.target.value })}
                     placeholder="Ex: 45 Rue de Rivoli, 75001 Paris"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Site Internet</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Site Internet</label>
                   <input 
-                    type="url" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                    type="url" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     value={newLead.website} onChange={(e) => setNewLead({ ...newLead, website: e.target.value })}
                     placeholder="https://www.exemple.fr"
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email</label>
+                    <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Email</label>
                     <input 
-                      type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      type="email" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                       value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Téléphone</label>
+                    <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Téléphone</label>
                     <input 
-                      type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                      type="text" className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                       value={newLead.phone} onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Notes</label>
+                  <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider mb-2">Notes</label>
                   <textarea 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all min-h-[80px]"
+                    className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all min-h-[80px]"
                     value={newLead.notes} onChange={(e) => setNewLead({ ...newLead, notes: e.target.value })}
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-3 p-5 border-t border-slate-100 bg-slate-50">
-                <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all duration-150" onClick={() => setShowAddModal(false)}>Annuler</button>
-                <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 active:scale-95 transition-all duration-150" disabled={actionInProgress}>Ajouter</button>
+              <div className="flex justify-end gap-3 p-5 border-t border-line bg-surface-2">
+                <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2 active:scale-95 transition-all duration-150" onClick={() => setShowAddModal(false)}>Annuler</button>
+                <button type="submit" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all duration-150" disabled={actionInProgress}>Ajouter</button>
               </div>
             </form>
           </div>
@@ -1448,19 +1504,19 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       {/* Slide-in side drawer (CRM view) */}
       {activeLeadDetails && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex justify-end transition-opacity" onClick={() => setActiveLeadDetails(null)}>
-          <div className="w-full max-w-lg bg-white h-screen border-l border-slate-200 shadow-2xl flex flex-col justify-between animate-[drawerSlideIn_0.3s_cubic-bezier(0.16,1,0.3,1)]" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-lg bg-surface h-screen border-l border-line shadow-2xl flex flex-col justify-between animate-[drawerSlideIn_0.3s_cubic-bezier(0.16,1,0.3,1)]" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="p-6 border-b border-slate-100 flex justify-between items-start">
+            <div className="p-6 border-b border-line flex justify-between items-start">
               <div>
-                <h3 className="font-heading font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-teal-600" />
+                <h3 className="font-display font-extrabold text-fg text-lg flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-accent" />
                   {activeLeadDetails.name}
                 </h3>
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-3xs font-bold uppercase tracking-wider mt-2 ${getStatusBadgeClass(activeLeadDetails.status)}`}>
                   {getStatusLabel(activeLeadDetails.status)}
                 </span>
               </div>
-              <button className="text-slate-400 hover:text-slate-600 p-1" onClick={() => setActiveLeadDetails(null)}>
+              <button className="text-fg-subtle hover:text-fg-muted p-1" onClick={() => setActiveLeadDetails(null)}>
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1469,82 +1525,82 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             <div className="p-6 overflow-y-auto flex-grow space-y-6">
               
               {/* Profile Overview */}
-              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <div className="bg-surface-2/60 border border-line/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">
                   Profil Général
                 </span>
                 <div className="grid grid-cols-2 gap-4 text-xs">
                   <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Secteur</span>
-                    <strong className="text-slate-800 font-bold">{activeLeadDetails.category}</strong>
+                    <span className="text-fg-subtle block text-[10px] uppercase font-bold tracking-wider mb-0.5">Secteur</span>
+                    <strong className="text-fg font-bold">{activeLeadDetails.category}</strong>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Localité</span>
-                    <strong className="text-slate-800 font-bold">{activeLeadDetails.city || '—'}</strong>
+                    <span className="text-fg-subtle block text-[10px] uppercase font-bold tracking-wider mb-0.5">Localité</span>
+                    <strong className="text-fg font-bold">{activeLeadDetails.city || '—'}</strong>
                   </div>
                   {activeLeadDetails.rating && (
                     <div className="col-span-2">
-                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Avis Google Maps</span>
+                      <span className="text-fg-subtle block text-[10px] uppercase font-bold tracking-wider mb-0.5">Avis Google Maps</span>
                       <div className="flex items-center gap-1">
-                        <Star className="w-4 h-4 fill-amber-400 stroke-amber-400" />
-                        <strong className="text-slate-800 text-sm font-bold">{activeLeadDetails.rating}</strong>
-                        <span className="text-slate-400 text-2xs">({activeLeadDetails.review_count || 0} avis)</span>
+                        <Star className="w-4 h-4 fill-[var(--wt-warning)] stroke-[var(--wt-warning)]" />
+                        <strong className="text-fg text-sm font-bold">{activeLeadDetails.rating}</strong>
+                        <span className="text-fg-subtle text-2xs">({activeLeadDetails.review_count || 0} avis)</span>
                       </div>
                     </div>
                   )}
                   {activeLeadDetails.address && (
                     <div className="col-span-2">
-                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Adresse</span>
-                      <span className="text-slate-600">{activeLeadDetails.address}</span>
+                      <span className="text-fg-subtle block text-[10px] uppercase font-bold tracking-wider mb-0.5">Adresse</span>
+                      <span className="text-fg-muted">{activeLeadDetails.address}</span>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Contact details */}
-              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <div className="bg-surface-2/60 border border-line/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">
                   Coordonnées
                 </span>
                 <div className="space-y-3 text-xs">
                   {/* Web */}
                   <div className="flex items-start gap-3">
-                    <Globe className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <Globe className="w-4 h-4 text-fg-subtle mt-0.5" />
                     <div>
-                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Site Internet</span>
+                      <span className="text-fg-subtle block text-[9px] uppercase font-bold">Site Internet</span>
                       {activeLeadDetails.website ? (
-                        <a href={activeLeadDetails.website} target="_blank" rel="noreferrer" className="text-teal-600 hover:text-teal-700 font-semibold inline-flex items-center gap-1 mt-0.5">
+                        <a href={activeLeadDetails.website} target="_blank" rel="noreferrer" className="text-accent hover:text-accent font-semibold inline-flex items-center gap-1 mt-0.5">
                           {activeLeadDetails.website}
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span className="text-red-500">Aucun site détecté (Cible Web Design)</span>
+                        <span className="text-[var(--wt-danger)]">Aucun site détecté (Cible Web Design)</span>
                       )}
                     </div>
                   </div>
                   {/* Email */}
                   <div className="flex items-start gap-3">
-                    <Mail className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <Mail className="w-4 h-4 text-fg-subtle mt-0.5" />
                     <div>
-                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Email</span>
+                      <span className="text-fg-subtle block text-[9px] uppercase font-bold">Email</span>
                       {activeLeadDetails.email ? (
-                        <a href={`mailto:${activeLeadDetails.email}`} className="text-teal-600 hover:text-teal-700 font-semibold mt-0.5 block">
+                        <a href={`mailto:${activeLeadDetails.email}`} className="text-accent hover:text-accent font-semibold mt-0.5 block">
                           {activeLeadDetails.email}
                         </a>
                       ) : (
-                        <span className="text-slate-400">Non disponible</span>
+                        <span className="text-fg-subtle">Non disponible</span>
                       )}
                     </div>
                   </div>
                   {/* Phone */}
                   <div className="flex items-start gap-3">
-                    <Phone className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <Phone className="w-4 h-4 text-fg-subtle mt-0.5" />
                     <div>
-                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Téléphone</span>
+                      <span className="text-fg-subtle block text-[9px] uppercase font-bold">Téléphone</span>
                       {activeLeadDetails.phone ? (
-                        <strong className="text-slate-800 block mt-0.5">{activeLeadDetails.phone}</strong>
+                        <strong className="text-fg block mt-0.5">{activeLeadDetails.phone}</strong>
                       ) : (
-                        <span className="text-slate-400">Non disponible</span>
+                        <span className="text-fg-subtle">Non disponible</span>
                       )}
                     </div>
                   </div>
@@ -1553,13 +1609,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
               {/* Scraper action inside drawer */}
               {activeLeadDetails.website && !activeLeadDetails.email && (
-                <div className="bg-teal-50 border border-teal-100 rounded-xl p-4 flex justify-between items-center gap-3">
+                <div className="bg-accent-soft border border-line rounded-xl p-4 flex justify-between items-center gap-3">
                   <div>
-                    <h5 className="text-xs font-bold text-teal-800">Crawler le site du prospect</h5>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Scraping des emails et détection de sécurité.</p>
+                    <h5 className="text-xs font-bold text-accent">Crawler le site du prospect</h5>
+                    <p className="text-[10px] text-fg-muted mt-0.5">Scraping des emails et détection de sécurité.</p>
                   </div>
                   <button 
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white font-semibold text-xs hover:bg-accent transition-colors"
                     onClick={() => handleScrapeContactInfo(activeLeadDetails.id)}
                     disabled={scrapingLeadId === activeLeadDetails.id}
                   >
@@ -1575,15 +1631,15 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
 
               {/* Status Selector */}
-              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-3">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <div className="bg-surface-2/60 border border-line/80 rounded-xl p-4 space-y-3">
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">
                   Statut du Pipeline
                 </span>
                 <div className="flex gap-2 flex-wrap">
                   {PIPELINE_STATUSES.map(st => (
                     <button 
                       key={st} type="button" 
-                      className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${activeLeadDetails.status === st ? 'bg-teal-600 border-teal-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                      className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${activeLeadDetails.status === st ? 'bg-accent border-accent text-white shadow-sm' : 'bg-surface border-line text-fg-muted hover:bg-surface-2'}`}
                       onClick={() => handleUpdateStatus(activeLeadDetails.id, st)}
                     >
                       {getStatusLabel(st)}
@@ -1594,9 +1650,9 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
               {/* General Note */}
               <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Notes Générales</label>
+                <label className="block text-xs font-bold text-fg-muted uppercase tracking-wider">Notes Générales</label>
                 <textarea 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:border-teal-500 min-h-[80px]" 
+                  className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-fg text-sm focus:outline-none focus:border-accent min-h-[80px]" 
                   defaultValue={activeLeadDetails.notes} 
                   onBlur={(e) => handleSaveNotes(activeLeadDetails.id, e.target.value)}
                   placeholder="Saisissez des notes sur ce prospect..."
@@ -1604,8 +1660,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               </div>
 
               {/* Discussions & Timeline */}
-              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-4">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <div className="bg-surface-2/60 border border-line/80 rounded-xl p-4 space-y-4">
+                <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">
                   Historique des Échanges
                 </span>
 
@@ -1613,11 +1669,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 <form onSubmit={handleAddDiscussion} className="space-y-3">
                   <div className="flex gap-1.5 flex-wrap">
                     {[
-                      { type: 'Note', label: 'Note', icon: FileText, color: '#64748b', bg: 'bg-slate-50 border-slate-200 text-slate-600' },
-                      { type: 'Email', label: 'Email', icon: Mail, color: '#059669', bg: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-                      { type: 'Call', label: 'Appel', icon: Phone, color: '#d97706', bg: 'bg-amber-50 border-amber-200 text-amber-700' },
-                      { type: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle, color: '#0d9488', bg: 'bg-teal-50 border-teal-200 text-teal-700' },
-                      { type: 'Meeting', label: 'RDV', icon: Calendar, color: '#7c3aed', bg: 'bg-violet-50 border-violet-200 text-violet-700' }
+                      { type: 'Note', label: 'Note', icon: FileText, color: 'var(--wt-fg-subtle)', bg: 'bg-surface-2 border-line text-fg-muted' },
+                      { type: 'Email', label: 'Email', icon: Mail, color: 'var(--wt-success)', bg: 'bg-[var(--wt-success-soft)] border-line text-[var(--wt-success-fg)]' },
+                      { type: 'Call', label: 'Appel', icon: Phone, color: 'var(--wt-warning)', bg: 'bg-[var(--wt-warning-soft)] border-line text-[var(--wt-warning-fg)]' },
+                      { type: 'WhatsApp', label: 'WhatsApp', icon: MessageCircle, color: 'var(--wt-accent)', bg: 'bg-accent-soft border-accent text-accent' },
+                      { type: 'Meeting', label: 'RDV', icon: Calendar, color: 'var(--wt-brand-700)', bg: 'bg-accent-soft border-line text-accent' }
                     ].map(btn => {
                       const Icon = btn.icon;
                       const isSelected = discussionType === btn.type;
@@ -1625,7 +1681,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                         <button
                           key={btn.type} type="button"
                           onClick={() => setDiscussionType(btn.type)}
-                          className={`flex-1 flex flex-col items-center gap-1 p-2 rounded-xl border text-[9px] font-bold uppercase transition-all ${isSelected ? btn.bg : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
+                          className={`flex-1 flex flex-col items-center gap-1 p-2 rounded-xl border text-[9px] font-bold uppercase transition-all ${isSelected ? btn.bg : 'bg-surface border-line text-fg-subtle hover:bg-surface-2'}`}
                         >
                           <Icon className="w-3.5 h-3.5" />
                           {btn.label}
@@ -1636,13 +1692,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
                   <div className="flex gap-2">
                     <input
-                      type="text" className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-teal-500"
+                      type="text" className="flex-1 bg-surface border border-line rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-accent"
                       value={discussionContent} onChange={(e) => setDiscussionContent(e.target.value)}
                       placeholder={`Résumé de l'échange (${discussionType})...`}
                       required
                     />
                     <button
-                      type="submit" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700"
+                      type="submit" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent"
                       disabled={addingDiscussion || !discussionContent.trim()}
                     >
                       {addingDiscussion ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Ajouter'}
@@ -1653,24 +1709,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 {/* Timeline list */}
                 {loadingDiscussions ? (
                   <div className="flex justify-center py-4">
-                    <RefreshCw className="w-5 h-5 animate-spin text-teal-600" />
+                    <RefreshCw className="w-5 h-5 animate-spin text-accent" />
                   </div>
                 ) : discussions.length === 0 ? (
-                  <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-white/40">
-                    <MessageSquare className="w-5 h-5 mx-auto mb-2 text-slate-300" />
-                    <p className="text-3xs text-slate-400">Aucun échange pour le moment.</p>
+                  <div className="text-center py-6 border border-dashed border-line rounded-xl bg-surface/40">
+                    <MessageSquare className="w-5 h-5 mx-auto mb-2 text-[var(--wt-rail-fg)]" />
+                    <p className="text-3xs text-fg-subtle">Aucun échange pour le moment.</p>
                   </div>
                 ) : (
                   <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                     {discussions.map((item) => {
                       const configMap = {
-                        'Note': { icon: FileText, color: 'text-slate-500', label: 'Note', bg: 'bg-slate-50 border-slate-200' },
-                        'Email': { icon: Mail, color: 'text-emerald-600', label: 'Email', bg: 'bg-emerald-50 border-emerald-200' },
-                        'Call': { icon: Phone, color: 'text-amber-500', label: 'Appel', bg: 'bg-amber-50 border-amber-200' },
-                        'WhatsApp': { icon: MessageCircle, color: 'text-teal-600', label: 'WhatsApp', bg: 'bg-teal-50 border-teal-200' },
-                        'Meeting': { icon: Calendar, color: 'text-violet-600', label: 'RDV', bg: 'bg-violet-50 border-violet-200' }
+                        'Note': { icon: FileText, color: 'text-fg-muted', label: 'Note', bg: 'bg-surface-2 border-line' },
+                        'Email': { icon: Mail, color: 'text-[var(--wt-success)]', label: 'Email', bg: 'bg-[var(--wt-success-soft)] border-line' },
+                        'Call': { icon: Phone, color: 'text-[var(--wt-warning)]', label: 'Appel', bg: 'bg-[var(--wt-warning-soft)] border-line' },
+                        'WhatsApp': { icon: MessageCircle, color: 'text-accent', label: 'WhatsApp', bg: 'bg-accent-soft border-accent' },
+                        'Meeting': { icon: Calendar, color: 'text-accent', label: 'RDV', bg: 'bg-accent-soft border-line' }
                       };
-                      const config = configMap[item.type] || { icon: FileText, color: 'text-slate-500', label: item.type, bg: 'bg-slate-50 border-slate-200' };
+                      const config = configMap[item.type] || { icon: FileText, color: 'text-fg-muted', label: item.type, bg: 'bg-surface-2 border-line' };
                       const ItemIcon = config.icon;
                       
                       const dateObj = new Date(item.created_at);
@@ -1679,7 +1735,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                         : dateObj.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
                       return (
-                        <div key={item.id} className="relative group flex gap-3 p-3 bg-white border border-slate-150 rounded-xl">
+                        <div key={item.id} className="relative group flex gap-3 p-3 bg-surface border border-line rounded-xl">
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${config.bg}`}>
                             <ItemIcon className="w-4 h-4" />
                           </div>
@@ -1687,13 +1743,13 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                           <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-baseline mb-0.5">
                               <span className={`text-[9px] font-bold uppercase ${config.color}`}>{config.label}</span>
-                              <span className="text-[9px] text-slate-400">{formattedDate}</span>
+                              <span className="text-[9px] text-fg-subtle">{formattedDate}</span>
                             </div>
-                            <p className="text-xs text-slate-700 leading-normal overflow-wrap-anywhere">{item.content}</p>
+                            <p className="text-xs text-fg leading-normal overflow-wrap-anywhere">{item.content}</p>
                           </div>
 
                           <button
-                            type="button" className="absolute top-2.5 right-2.5 text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                            type="button" className="absolute top-2.5 right-2.5 text-[var(--wt-rail-fg)] hover:text-[var(--wt-danger)] opacity-0 group-hover:opacity-100 transition-opacity"
                             onClick={() => handleDeleteDiscussion(item.id)}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1708,8 +1764,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-slate-100 flex justify-end bg-slate-50">
-              <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setActiveLeadDetails(null)}>Fermer</button>
+            <div className="p-4 border-t border-line flex justify-end bg-surface-2">
+              <button type="button" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2" onClick={() => setActiveLeadDetails(null)}>Fermer</button>
             </div>
           </div>
         </div>
@@ -1718,14 +1774,14 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       {/* Modal: File Import Wizard */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out] flex flex-col justify-between ${importStep === 2 ? 'max-w-4xl' : 'max-w-lg'}`}>
-            <div className="flex justify-between items-center p-5 border-b border-slate-100">
+          <div className={`w-full bg-surface border border-line rounded-2xl shadow-xl overflow-hidden animate-[modalFadeIn_0.25s_ease-out] flex flex-col justify-between ${importStep === 2 ? 'max-w-4xl' : 'max-w-lg'}`}>
+            <div className="flex justify-between items-center p-5 border-b border-line">
               <div>
-                <h3 className="font-heading font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-teal-600" />
+                <h3 className="font-display font-extrabold text-fg text-lg flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-accent" />
                   Assistant d'importation de prospects
                 </h3>
-                <p className="text-3xs text-slate-400 font-bold uppercase tracking-wider mt-1">
+                <p className="text-3xs text-fg-subtle font-bold uppercase tracking-wider mt-1">
                   Étape {importStep} sur 4 : {
                     importStep === 1 ? "Téléversement" :
                     importStep === 2 ? "Correspondance & classification" :
@@ -1734,7 +1790,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 </p>
               </div>
               {importStep !== 3 && (
-                <button className="text-slate-400 hover:text-slate-600" onClick={() => setShowImportModal(false)}>
+                <button className="text-fg-subtle hover:text-fg-muted" onClick={() => setShowImportModal(false)}>
                   <X className="w-5 h-5" />
                 </button>
               )}
@@ -1744,7 +1800,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               {/* STEP 1 */}
               {importStep === 1 && (
                 <div className="space-y-4">
-                  <p className="text-slate-500 text-sm">
+                  <p className="text-fg-muted text-sm">
                     Sélectionnez un fichier <strong>JSON</strong>, <strong>CSV</strong>, ou <strong>Excel (.xlsx, .xls)</strong> contenant vos cibles.
                   </p>
                   
@@ -1756,21 +1812,21 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                       if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileSelection(e.dataTransfer.files[0]);
                     }}
                     onClick={() => document.getElementById('import-file-input').click()}
-                    className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-4 ${isDragging ? 'border-teal-500 bg-teal-50/30' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50'}`}
+                    className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-4 ${isDragging ? 'border-accent bg-accent-soft/30' : 'border-line bg-surface-2/50 hover:bg-surface-2'}`}
                   >
                     <input 
                       type="file" id="import-file-input" className="hidden" accept=".json,.csv,.txt,.xlsx,.xls"
                       onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileSelection(e.target.files[0]); }}
                     />
-                    <FileText className={`w-12 h-12 ${isDragging ? 'text-teal-600' : 'text-slate-400'}`} />
+                    <FileText className={`w-12 h-12 ${isDragging ? 'text-accent' : 'text-fg-subtle'}`} />
                     <div>
-                      <strong className="text-slate-800 text-sm block mb-1">Déposez votre fichier ici</strong>
-                      <span className="text-slate-400 text-xs">Ou cliquez pour parcourir les dossiers</span>
+                      <strong className="text-fg text-sm block mb-1">Déposez votre fichier ici</strong>
+                      <span className="text-fg-subtle text-xs">Ou cliquez pour parcourir les dossiers</span>
                     </div>
                   </div>
 
                   {importError && (
-                    <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
+                    <div className="p-4 bg-[var(--wt-danger-soft)] border border-line text-[var(--wt-danger-fg)] rounded-xl text-xs flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 flex-shrink-0" />
                       <span>{importError}</span>
                     </div>
@@ -1781,27 +1837,27 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               {/* STEP 2 */}
               {importStep === 2 && (
                 <div className="space-y-6">
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Valeurs de classification par défaut</span>
+                  <div className="bg-surface-2 border border-line rounded-xl p-4 space-y-4">
+                    <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider block">Valeurs de classification par défaut</span>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Secteur / Catégorie *</label>
+                        <label className="block text-3xs font-bold text-fg-muted uppercase tracking-wider mb-1">Secteur / Catégorie *</label>
                         <input 
-                          type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          type="text" className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-xs focus:outline-none"
                           value={defaultCategory} onChange={(e) => setDefaultCategory(e.target.value)} required
                         />
                       </div>
                       <div>
-                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Ville par défaut</label>
+                        <label className="block text-3xs font-bold text-fg-muted uppercase tracking-wider mb-1">Ville par défaut</label>
                         <input 
-                          type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          type="text" className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-xs focus:outline-none"
                           value={defaultCity} onChange={(e) => setDefaultCity(e.target.value)}
                         />
                       </div>
                       <div>
-                        <label className="block text-3xs font-bold text-slate-500 uppercase tracking-wider mb-1">Statut initial</label>
+                        <label className="block text-3xs font-bold text-fg-muted uppercase tracking-wider mb-1">Statut initial</label>
                         <select 
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                          className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-xs focus:outline-none"
                           value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}
                         >
                           {PIPELINE_STATUSES.map(st => (
@@ -1813,20 +1869,20 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="font-heading font-extrabold text-slate-800 text-sm">Correspondance des attributs</h4>
-                    <p className="text-slate-400 text-xs">Mappez les colonnes détectées dans <strong>{uploadedFileName}</strong> aux variables du CRM.</p>
+                    <h4 className="font-display font-extrabold text-fg text-sm">Correspondance des attributs</h4>
+                    <p className="text-fg-subtle text-xs">Mappez les colonnes détectées dans <strong>{uploadedFileName}</strong> aux variables du CRM.</p>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl bg-slate-50/50 p-4 max-h-48 overflow-y-auto space-y-2.5">
-                    <div className="grid grid-cols-2 gap-4 pb-2 border-b border-slate-200 text-3xs font-bold text-slate-400 uppercase">
+                  <div className="border border-line rounded-xl bg-surface-2/50 p-4 max-h-48 overflow-y-auto space-y-2.5">
+                    <div className="grid grid-cols-2 gap-4 pb-2 border-b border-line text-3xs font-bold text-fg-subtle uppercase">
                       <span>Variable base locale</span>
                       <span>Colonne de votre fichier</span>
                     </div>
                     {DATABASE_FIELDS.map(field => (
                       <div key={field.key} className="grid grid-cols-2 gap-4 items-center">
-                        <span className={`text-xs ${field.required ? 'font-bold text-slate-800' : 'text-slate-500'}`}>{field.label}</span>
+                        <span className={`text-xs ${field.required ? 'font-bold text-fg' : 'text-fg-muted'}`}>{field.label}</span>
                         <select
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none"
+                          className="bg-surface border border-line rounded-lg px-3 py-1.5 text-xs focus:outline-none"
                           value={columnMappings[field.key] || ''}
                           onChange={(e) => setColumnMappings({ ...columnMappings, [field.key]: e.target.value })}
                         >
@@ -1840,11 +1896,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="font-heading font-extrabold text-slate-800 text-sm">Aperçu de l'Importation</h4>
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-32">
+                    <h4 className="font-display font-extrabold text-fg text-sm">Aperçu de l'Importation</h4>
+                    <div className="overflow-x-auto border border-line rounded-xl max-h-32">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-bold">
+                          <tr className="bg-surface-2 border-b border-line text-fg-subtle font-bold">
                             {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => (
                               <th key={f.key} className="p-2.5 whitespace-nowrap">{f.label.replace(' *', '')}</th>
                             ))}
@@ -1852,7 +1908,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                         </thead>
                         <tbody>
                           {parsedRows.slice(0, 3).map((row, idx) => (
-                            <tr key={idx} className="border-b border-slate-100 last:border-b-0 text-slate-600">
+                            <tr key={idx} className="border-b border-line last:border-b-0 text-fg-muted">
                               {DATABASE_FIELDS.filter(f => columnMappings[f.key]).map(f => {
                                 const col = columnMappings[f.key];
                                 let val = row[col];
@@ -1875,18 +1931,18 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               {/* STEP 3 */}
               {importStep === 3 && (
                 <div className="py-12 flex flex-col items-center justify-center gap-4 text-center">
-                  <RefreshCw className="w-12 h-12 text-teal-600 animate-spin" />
+                  <RefreshCw className="w-12 h-12 text-accent animate-spin" />
                   <div>
-                    <h4 className="font-heading font-extrabold text-slate-800 text-base">Traitement de l'importation...</h4>
-                    <p className="text-slate-500 text-xs mt-1">Nettoyage, indexation et de-duplication en tâche de fond.</p>
+                    <h4 className="font-display font-extrabold text-fg text-base">Traitement de l'importation...</h4>
+                    <p className="text-fg-muted text-xs mt-1">Nettoyage, indexation et de-duplication en tâche de fond.</p>
                   </div>
                   <div className="w-full max-w-xs">
-                    <div className="flex justify-between text-2xs font-bold text-slate-400 mb-1.5 uppercase">
+                    <div className="flex justify-between text-2xs font-bold text-fg-subtle mb-1.5 uppercase">
                       <span>Progression</span>
                       <span>{importProgress}%</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-teal-600 transition-all duration-300" style={{ width: `${importProgress}%` }}></div>
+                    <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
+                      <div className="h-full bg-accent transition-all duration-300" style={{ width: `${importProgress}%` }}></div>
                     </div>
                   </div>
                 </div>
@@ -1895,46 +1951,46 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
               {/* STEP 4 */}
               {importStep === 4 && (
                 <div className="py-6 flex flex-col items-center justify-center gap-5 text-center">
-                  <div className="w-14 h-14 bg-emerald-50 border-2 border-emerald-500 rounded-full flex items-center justify-center text-emerald-600 shadow-sm shadow-emerald-500/10">
+                  <div className="w-14 h-14 bg-[var(--wt-success-soft)] border-2 border-[var(--wt-success)] rounded-full flex items-center justify-center text-[var(--wt-success)] shadow-sm shadow-emerald-500/10">
                     <Check className="w-8 h-8" />
                   </div>
                   <div>
-                    <h3 className="font-heading font-extrabold text-slate-800 text-lg">Importation complétée !</h3>
-                    <p className="text-slate-500 text-sm mt-1">Vos prospects ont été correctement importés et qualifiés.</p>
+                    <h3 className="font-display font-extrabold text-fg text-lg">Importation complétée !</h3>
+                    <p className="text-fg-muted text-sm mt-1">Vos prospects ont été correctement importés et qualifiés.</p>
                   </div>
-                  <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-left text-xs text-slate-600">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Rapport d'activité</span>
+                  <div className="w-full bg-surface-2 border border-line rounded-xl p-4 space-y-2 text-left text-xs text-fg-muted">
+                    <span className="text-[10px] font-bold text-fg-subtle uppercase tracking-wider block mb-2">Rapport d'activité</span>
                     <div className="flex justify-between">
                       <span>Total des cibles analysées :</span>
-                      <strong className="text-slate-800">{importResult.total}</strong>
+                      <strong className="text-fg">{importResult.total}</strong>
                     </div>
                     <div className="flex justify-between">
                       <span>Prospects importés :</span>
-                      <strong className="text-emerald-600">+{importResult.inserted}</strong>
+                      <strong className="text-[var(--wt-success)]">+{importResult.inserted}</strong>
                     </div>
                     <div className="flex justify-between">
                       <span>Doublons ignorés (sécurité) :</span>
-                      <strong className="text-amber-600">{importResult.skipped}</strong>
+                      <strong className="text-[var(--wt-warning)]">{importResult.skipped}</strong>
                     </div>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            <div className="p-5 border-t border-line bg-surface-2 flex justify-end gap-3">
               {importStep === 1 && (
-                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setShowImportModal(false)}>Fermer</button>
+                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2" onClick={() => setShowImportModal(false)}>Fermer</button>
               )}
               {importStep === 2 && (
                 <>
-                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50" onClick={() => setImportStep(1)}>Précédent</button>
-                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700 disabled:opacity-50" onClick={handleLaunchImport} disabled={!columnMappings.name}>
+                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-surface border border-line text-fg font-semibold text-xs hover:bg-surface-2" onClick={() => setImportStep(1)}>Précédent</button>
+                  <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent disabled:opacity-50" onClick={handleLaunchImport} disabled={!columnMappings.name}>
                     Lancer l'import ({parsedRows.length} prospects)
                   </button>
                 </>
               )}
               {importStep === 4 && (
-                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-teal-600 text-white font-semibold text-xs hover:bg-teal-700" onClick={() => setShowImportModal(false)}>Terminer</button>
+                <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent" onClick={() => setShowImportModal(false)}>Terminer</button>
               )}
             </div>
           </div>

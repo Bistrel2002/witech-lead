@@ -1,0 +1,278 @@
+/* Landing-page motion and atmosphere.
+ *
+ * Scoped to the marketing page: none of this ships to the app bundle. Every
+ * colour here comes from the theme tokens, so the page themes with the rest
+ * of the product.
+ *
+ * The whole file degrades to "no motion, final state" under
+ * prefers-reduced-motion, which is handled once at the bottom rather than
+ * per-rule.
+ */
+
+/* ── Atmosphere ───────────────────────────────────────────────────────── */
+
+/* A magenta bloom behind the hero. Two offset radial gradients rather than
+ * one, so the falloff is not a perfect circle — a single radial reads as a
+ * spotlight, two reads as light in a room. */
+.wt-bloom {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 78vh;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 52% at 22% 18%, color-mix(in oklab, var(--wt-brand-500) 26%, transparent) 0%, transparent 68%),
+    radial-gradient(40% 46% at 78% 4%, color-mix(in oklab, var(--wt-brand-700) 24%, transparent) 0%, transparent 66%);
+  filter: blur(12px);
+}
+
+/* Light theme gets a fainter bloom: the same alpha over white turns into a
+ * washed-out lilac fog instead of a glow. */
+:root:not([data-theme='dark']) .wt-bloom {
+  opacity: 0.5;
+}
+
+/* Hairline grid, fading out downward. Gives the dark hero something to sit
+ * on without adding a colour to the palette. */
+.wt-grid-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--wt-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--wt-line) 1px, transparent 1px);
+  background-size: 72px 72px;
+  opacity: 0.4;
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 72%);
+}
+
+/* ── Entrance choreography ────────────────────────────────────────────── */
+
+/* Page-load sequence. The hero's own elements use this with an inline
+ * --wt-delay so the order is readable in the JSX rather than encoded in a
+ * pile of nth-child rules. */
+@keyframes wt-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.wt-rise {
+  animation: wt-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--wt-delay, 0ms);
+}
+
+/* Scroll-triggered reveal. The hidden state is applied by the hook only
+ * once it has confirmed IntersectionObserver support, so content is never
+ * left invisible if the observer never runs. */
+.wt-reveal {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--wt-delay, 0ms);
+}
+
+.wt-reveal[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── The console ──────────────────────────────────────────────────────── */
+
+/* Gradient hairline around the console, drawn as a border-box mask so the
+ * inside stays transparent and the card's own surface shows through. */
+.wt-console-frame {
+  position: relative;
+  border-radius: var(--wt-radius-xl);
+  background: var(--wt-surface);
+}
+
+.wt-console-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    150deg,
+    color-mix(in oklab, var(--wt-brand-500) 70%, transparent),
+    color-mix(in oklab, var(--wt-brand-700) 45%, transparent) 42%,
+    var(--wt-line) 78%
+  );
+  /* Two-layer mask leaves only the 1px padding ring painted. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* The typing caret. Steps(1) so it snaps rather than fading, which is what
+ * a real terminal caret does. */
+@keyframes wt-caret {
+  50% { opacity: 0; }
+}
+
+.wt-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--wt-brand-500);
+  animation: wt-caret 1s steps(1) infinite;
+}
+
+/* A result row landing in the list. Slides from the left, because the rows
+ * arrive from the search on the left of the console header. */
+@keyframes wt-row-in {
+  from { opacity: 0; transform: translate3d(-10px, 0, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.wt-row-in {
+  animation: wt-row-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The scanning sweep that runs while the search is "working". */
+@keyframes wt-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(320%); }
+}
+
+.wt-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 32%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--wt-brand-500) 55%, transparent),
+    transparent
+  );
+  animation: wt-sweep 1.15s ease-in-out infinite;
+}
+
+/* Live dot on the console header. */
+@keyframes wt-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+.wt-pulse {
+  animation: wt-pulse 1.6s ease-in-out infinite;
+}
+
+/* ── Product tour ─────────────────────────────────────────────────────── */
+
+/* Screen change inside the tour window. Short and small on purpose: the
+ * window frame stays put and only its contents cross-fade, which is what
+ * sells it as one application switching views rather than four cards. */
+@keyframes wt-screen-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.wt-screen-in {
+  animation: wt-screen-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Featured plan ────────────────────────────────────────────────────── */
+
+/* Same masked-ring technique as the console, at full brand strength, plus a
+ * bloom underneath so the card lifts off the section rather than just being
+ * outlined. */
+.wt-plan-featured {
+  position: relative;
+  background: var(--wt-surface);
+  box-shadow:
+    var(--wt-shadow-lg),
+    0 0 44px -12px color-mix(in oklab, var(--wt-brand-500) 45%, transparent);
+}
+
+.wt-plan-featured::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--wt-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ── Pipeline connector ───────────────────────────────────────────────── */
+
+/* The four stages are a real sequence, so the connector fills left-to-right
+ * as the section scrolls in, in step order. */
+.wt-pipe {
+  position: absolute;
+  top: 1.35rem;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--wt-line);
+  overflow: hidden;
+}
+
+.wt-pipe::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--wt-gradient);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 1.4s cubic-bezier(0.22, 1, 0.36, 1) 0.15s;
+}
+
+.wt-pipe[data-shown='true']::after {
+  transform: scaleX(1);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+
+/* Everything above resolves to its finished state. The console component
+ * separately reads this preference and renders its completed result rather
+ * than running the timeline, so the page still demonstrates the product. */
+@media (prefers-reduced-motion: reduce) {
+  .wt-rise,
+  .wt-row-in,
+  .wt-screen-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .wt-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .wt-caret,
+  .wt-pulse,
+  .wt-sweep::after {
+    animation: none;
+  }
+
+  .wt-sweep::after {
+    display: none;
+  }
+
+  .wt-pipe::after {
+    transition: none;
+    transform: scaleX(1);
+  }
+}

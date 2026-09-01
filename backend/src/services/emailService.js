@@ -2,6 +2,7 @@ import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import twilio from 'twilio';
 import { getDb } from '../database/db.js';
 import { getPlatformConfig } from '../config/platformConfig.js';
+import { isSendable, BLOCK_REASONS, RECONTACT_COOLDOWN_DAYS, MAX_CONTACT_ATTEMPTS } from './outreachPolicy.js';
 import { buildFromAddress } from './sendingDomainService.js';
 import { buildUnsubscribeUrl, isSuppressed } from './unsubscribeService.js';
 
@@ -147,6 +148,39 @@ const activeCampaignRuns = new Set();
  * by reading. Production callers pass nothing and get the real database, the
  * real SES client and the real 5-second stagger.
  */
+/* Lead statuses a campaign run is allowed to set, and from where.
+ *
+ * A campaign only ever moves a prospect forward from the two "not yet worked"
+ * states. Re-running a campaign over a list that already contains a booked
+ * meeting must not drag that prospect back to "Contacted" — the salesperson's
+ * own progress outranks anything an automated send knows.
+ */
+const CAMPAIGN_MAY_OVERWRITE = new Set(['New', 'Call Only']);
+
+async function advanceLeadStatus(db, leadId, nextStatus) {
+  const lead = await db.get('SELECT status FROM leads WHERE id = ?', leadId);
+  if (!lead) return false;
+  if (!CAMPAIGN_MAY_OVERWRITE.has(lead.status)) return false;
+  if (lead.status === nextStatus) return false;
+  await db.run('UPDATE leads SET status = ? WHERE id = ?', nextStatus, leadId);
+  return true;
+}
+
+/* One line in the prospect's exchange history, using the types the app's own
+ * discussion panel offers (Note, Email, Call, WhatsApp, Meeting). */
+async function recordDiscussion(db, leadId, type, content) {
+  try {
+    await db.run(
+      'INSERT INTO lead_discussions (lead_id, type, content) VALUES (?, ?, ?)',
+      leadId, type, content
+    );
+  } catch (err) {
+    // History is a record of what happened, not a precondition for it. A
+    // campaign must never abort because its journal write failed.
+    console.error(`CampaignService: could not record history for lead ${leadId}:`, err.message);
+  }
+}
+
 export async function runCampaignBackground(campaignId, deps = {}) {
   if (activeCampaignRuns.has(campaignId)) return;
   activeCampaignRuns.add(campaignId);
@@ -222,6 +256,29 @@ export async function runCampaignBackground(campaignId, deps = {}) {
           "UPDATE campaign_logs SET status = 'Failed', error_message = 'No email address available' WHERE id = ?",
           prospect.log_id
         );
+
+        // Unreachable by email is not the same as worthless. A prospect with a
+        // phone number is still workable — it just needs a human — so it moves
+        // to its own column instead of staying mixed in with the untouched
+        // ones. With neither address nor number there is nothing left to try.
+        if (prospect.phone) {
+          await advanceLeadStatus(db, prospect.id, 'Call Only');
+          await recordDiscussion(
+            db,
+            prospect.id,
+            'Note',
+            `Campagne « ${campaign.name} » — aucune adresse e-mail, à contacter par téléphone`
+          );
+        } else {
+          await advanceLeadStatus(db, prospect.id, 'Closed Lost');
+          await recordDiscussion(
+            db,
+            prospect.id,
+            'Note',
+            `Campagne « ${campaign.name} » — ni e-mail ni téléphone, prospect inexploitable`
+          );
+        }
+
         failedCount++;
         await db.run('UPDATE campaigns SET failed_count = ? WHERE id = ?', failedCount, campaignId);
         continue;
@@ -235,6 +292,31 @@ export async function runCampaignBackground(campaignId, deps = {}) {
         failedCount++;
         await db.run('UPDATE campaigns SET failed_count = ? WHERE id = ?', failedCount, campaignId);
         continue;
+      }
+
+      /* Re-contact policy, checked here and not only when the campaign was
+       * built. A campaign can sit queued for days before it runs, and two
+       * campaigns can be queued for the same prospect before either does, so
+       * the filter at creation time is a courtesy and this is the guard.
+       *
+       * Skipped rather than Failed: declining to over-contact somebody is the
+       * policy working, and counting it as a failure would make a
+       * well-behaved tenant look broken in the health metrics. */
+      if (channel === 'email') {
+        const verdict = await isSendable(db, prospect.id);
+        if (!verdict.ok) {
+          const why = verdict.reason === BLOCK_REASONS.MAX_ATTEMPTS
+            ? `Déjà contacté ${MAX_CONTACT_ATTEMPTS} fois`
+            : `Recontact possible dans ${verdict.daysRemaining} j (délai ${RECONTACT_COOLDOWN_DAYS} j)`;
+          await db.run(
+            "UPDATE campaign_logs SET status = 'Skipped', error_message = ?, sent_at = CURRENT_TIMESTAMP WHERE id = ?",
+            why,
+            prospect.log_id
+          );
+          skippedCount++;
+          await db.run('UPDATE campaigns SET skipped_count = ? WHERE id = ?', skippedCount, campaignId);
+          continue;
+        }
       }
 
       if (channel === 'email' && await isSuppressed(db, campaign.user_id, prospect.email)) {
@@ -311,8 +393,17 @@ export async function runCampaignBackground(campaignId, deps = {}) {
           prospect.log_id
         );
 
-        // Update Lead Status
-        await db.run("UPDATE leads SET status = 'Contacted' WHERE id = ?", prospect.lead_id);
+        // prospect.lead_id was undefined here: the prospect row is
+        // "SELECT l.*, cl.id AS log_id", which carries no lead_id column, so
+        // every one of these updates matched nothing. 89 delivered emails had
+        // left their prospect sitting on "New" before this was corrected.
+        await advanceLeadStatus(db, prospect.id, 'Contacted');
+        await recordDiscussion(
+          db,
+          prospect.id,
+          'Email',
+          `Campagne « ${campaign.name} » — e-mail envoyé à ${prospect.email}`
+        );
         sentCount++;
 
       } catch (err) {

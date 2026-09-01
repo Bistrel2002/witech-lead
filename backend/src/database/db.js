@@ -273,6 +273,34 @@ async function initPostgresDb(db) {
   // ADD COLUMN IF NOT EXISTS migrates installs created before it existed.
   await db.exec(`
     ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS skipped_count INTEGER DEFAULT 0;
+    -- How many outreach waves this campaign has actually sent, and when the
+    -- last one went out. Both drive the relaunch rule; deriving them from
+    -- campaign_logs is not possible because a wave that reached nobody still
+    -- counts as a wave.
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS run_count INTEGER DEFAULT 0;
+    ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP;
+
+    -- Seed the new columns from evidence already in the database. Without
+    -- this every campaign that ever ran reads as "never launched", the
+    -- relaunch control never appears for any of them, and the feature is
+    -- silently inert on exactly the accounts that need it.
+    --
+    -- One wave, dated at the campaign's last activity: older data cannot tell
+    -- us how many waves there really were, and one is the conservative floor —
+    -- it makes the button appear and starts the cooldown from the last thing
+    -- that actually happened. Guarded on run_count = 0, so it seeds once and
+    -- never disturbs a campaign the application has since counted.
+    UPDATE campaigns c
+       SET run_count = 1,
+           last_run_at = s.last_activity
+      FROM (
+        SELECT campaign_id, MAX(sent_at) AS last_activity
+          FROM campaign_logs
+         WHERE status IN ('Sent', 'Failed', 'Skipped')
+         GROUP BY campaign_id
+      ) s
+     WHERE s.campaign_id = c.id
+       AND c.run_count = 0;
   `);
 
   // Create campaign_logs table

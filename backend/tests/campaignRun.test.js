@@ -49,10 +49,12 @@ const CAMPAIGN = {
  * every call in order, so tests can assert on sequencing and not just on the
  * final state.
  */
-function fakeDb({ campaign = CAMPAIGN, prospects = [], suppressed = [] } = {}) {
+function fakeDb({ campaign = CAMPAIGN, prospects = [], suppressed = [], leadStatuses = {} } = {}) {
   const calls = [];
   const suppressedSet = new Set(suppressed.map((e) => e.toLowerCase()));
   let campaignStatus = campaign.status ?? 'Active';
+  // Lead rows the loop reads back before deciding whether it may advance them.
+  const leads = new Map(prospects.map((p) => [p.id, leadStatuses[p.id] ?? 'New']));
 
   return {
     calls,
@@ -63,6 +65,10 @@ function fakeDb({ campaign = CAMPAIGN, prospects = [], suppressed = [] } = {}) {
       if (/SELECT status FROM campaigns/i.test(sql)) return { status: campaignStatus };
       if (/FROM unsubscribes/i.test(sql)) {
         return suppressedSet.has(String(params[0]).toLowerCase()) ? { id: 99 } : undefined;
+      }
+      if (/SELECT status FROM leads/i.test(sql)) {
+        const status = leads.get(params[0]);
+        return status === undefined ? undefined : { status };
       }
       return undefined;
     },
@@ -75,6 +81,7 @@ function fakeDb({ campaign = CAMPAIGN, prospects = [], suppressed = [] } = {}) {
       calls.push({ kind: 'run', sql, params });
       const status = /UPDATE campaigns SET status = '(\w+)'/i.exec(sql);
       if (status) campaignStatus = status[1];
+      if (/UPDATE leads SET status/i.test(sql)) leads.set(params[1], params[0]);
       return { changes: 1 };
     }
   };
@@ -88,8 +95,12 @@ function fakeSes() {
   };
 }
 
+/* Mirrors "SELECT l.*, cl.id AS log_id" exactly. It deliberately carries no
+ * lead_id: the real query has no such column, and a fixture that invented one
+ * is what let `UPDATE leads ... WHERE id = prospect.lead_id` pass every test
+ * while matching zero rows in production. */
 const prospect = (n, over = {}) => ({
-  id: n, lead_id: n, log_id: 100 + n,
+  id: n, log_id: 100 + n,
   name: `Prospect ${n}`, email: `p${n}@exemple.fr`,
   phone: '0102030405', website: null, city: 'Nantes',
   ...over
@@ -98,6 +109,12 @@ const prospect = (n, over = {}) => ({
 /** Runs the loop with the delay stubbed out, and returns the fakes. */
 async function runCampaign(options) {
   const db = fakeDb(options);
+  db.leadStatusAfter = (id) => {
+    const updates = db.calls.filter(
+      (c) => c.kind === 'run' && /UPDATE leads SET status/i.test(c.sql) && c.params[1] === id
+    );
+    return updates.length ? updates[updates.length - 1].params[0] : null;
+  };
   const ses = fakeSes();
   await runCampaignBackground(1, { db, sesClient: ses, sleep: async () => {} });
   return { db, ses };
@@ -174,7 +191,12 @@ test('the suppression check runs before the send, not after', async () => {
   const { db } = await runCampaign({ prospects: [prospect(1)] });
 
   const checkIndex = db.calls.findIndex((c) => /FROM unsubscribes/i.test(c.sql));
-  const sendMarkerIndex = db.calls.findIndex((c) => /status = 'Sent'/i.test(c.sql));
+  // Anchored on the write that marks a send, not on any statement mentioning
+  // 'Sent': the re-contact policy reads campaign_logs WHERE status = 'Sent'
+  // earlier in the loop, and a looser pattern matches that instead.
+  const sendMarkerIndex = db.calls.findIndex(
+    (c) => /UPDATE campaign_logs SET status = 'Sent'/i.test(c.sql)
+  );
   assert.ok(checkIndex >= 0, 'the suppression check must actually run');
   assert.ok(sendMarkerIndex >= 0);
   assert.ok(checkIndex < sendMarkerIndex, 'suppression must be checked before sending');
@@ -255,4 +277,77 @@ test('the compiled body never names the platform operator', async () => {
   });
   const body = ses.sent[0].Content.Simple.Body.Text.Data;
   assert.doesNotMatch(body, /Wi'Tech/i);
+});
+
+
+// --- Feature 1: a campaign run must move its prospects, and say why ---------
+
+test('a delivered email moves the prospect to Contacted', async () => {
+  // This is the regression that mattered: the update targeted
+  // prospect.lead_id, a column "SELECT l.*, cl.id AS log_id" does not
+  // produce, so it matched nothing. 89 delivered emails had left their
+  // prospect on "New".
+  const { db } = await runCampaign({ prospects: [prospect(1)] });
+  assert.equal(db.leadStatusAfter(1), 'Contacted');
+});
+
+test('a delivered email is written to the prospect history as an Email', async () => {
+  const { db } = await runCampaign({ prospects: [prospect(1)] });
+  const entries = db.calls.filter(
+    (c) => c.kind === 'run' && /INSERT INTO lead_discussions/i.test(c.sql)
+  );
+  assert.equal(entries.length, 1);
+  const [leadId, type, content] = entries[0].params;
+  assert.equal(leadId, 1);
+  assert.equal(type, 'Email');
+  assert.match(content, /Campagne/);
+  assert.match(content, /p1@exemple\.fr/);
+});
+
+test('no email but a phone number routes the prospect to Call Only', async () => {
+  const { db } = await runCampaign({
+    prospects: [prospect(1, { email: null, phone: '0102030405' })]
+  });
+  assert.equal(db.leadStatusAfter(1), 'Call Only');
+});
+
+test('neither email nor phone closes the prospect as lost', async () => {
+  const { db } = await runCampaign({
+    prospects: [prospect(1, { email: null, phone: null })]
+  });
+  assert.equal(db.leadStatusAfter(1), 'Closed Lost');
+});
+
+test('a campaign never drags a prospect back from a later stage', async () => {
+  // Re-running a campaign over a list that already contains a booked meeting
+  // must not reset that prospect to Contacted: the salesperson's own progress
+  // outranks anything the send loop knows.
+  const { db } = await runCampaign({
+    prospects: [prospect(1)],
+    leadStatuses: { 1: 'Meeting Scheduled' }
+  });
+  assert.equal(db.leadStatusAfter(1), null);
+});
+
+test('a suppressed prospect keeps its status untouched', async () => {
+  // An opt-out says nothing about whether the prospect is workable, so the
+  // run must leave the column it sits in alone.
+  const { db } = await runCampaign({
+    prospects: [prospect(1)],
+    suppressed: ['p1@exemple.fr']
+  });
+  assert.equal(db.leadStatusAfter(1), null);
+});
+
+test('history failures never abort the run', async () => {
+  const db = fakeDb({ prospects: [prospect(1), prospect(2)] });
+  const realRun = db.run.bind(db);
+  db.run = async (sql, ...params) => {
+    if (/INSERT INTO lead_discussions/i.test(sql)) throw new Error('journal indisponible');
+    return realRun(sql, ...params);
+  };
+  const ses = fakeSes();
+  await runCampaignBackground(1, { db, sesClient: ses, sleep: async () => {} });
+  // Both emails still went out despite every journal write throwing.
+  assert.equal(ses.sent.length, 2);
 });

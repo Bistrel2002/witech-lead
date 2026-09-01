@@ -2,6 +2,15 @@ import express from 'express';
 import { getDb, getFrenchDb } from './database/db.js';
 import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperService.js';
 import { runCampaignBackground, assertChannelSendable, SMS_UNAVAILABLE_MESSAGE } from './services/emailService.js';
+import {
+  partitionEligible,
+  withOutreach,
+  describeRelaunch,
+  MAX_CAMPAIGN_RUNS,
+  BLOCK_REASONS,
+  RECONTACT_COOLDOWN_DAYS,
+  MAX_CONTACT_ATTEMPTS
+} from './services/outreachPolicy.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
 
@@ -453,7 +462,9 @@ router.get('/leads', async (req, res) => {
 
     query += ' ORDER BY id DESC';
     const leads = await db.all(query, ...params);
-    res.json(leads);
+    // How many times each prospect has been emailed and when it may be
+    // emailed again, so the list can show it without a second round trip.
+    res.json(await withOutreach(db, leads));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -998,6 +1009,13 @@ router.delete('/templates/:id', async (req, res) => {
 // ==========================================
 
 // Get campaigns with template summaries
+/* Attach the relaunch standing to each campaign so the report can show a
+ * countdown and enable its button at the right moment, without the browser
+ * re-deriving a rule that lives in outreachPolicy. */
+function withRelaunch(campaigns) {
+  return campaigns.map((c) => ({ ...c, relaunch: describeRelaunch(c) }));
+}
+
 router.get('/campaigns', async (req, res) => {
   try {
     const db = await getDb();
@@ -1008,7 +1026,7 @@ router.get('/campaigns', async (req, res) => {
       WHERE c.user_id = ?
       ORDER BY c.id DESC
     `, req.user.id);
-    res.json(campaigns);
+    res.json(withRelaunch(campaigns));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1052,6 +1070,90 @@ router.post('/campaigns', async (req, res) => {
       return res.status(400).json({ error: 'No matching leads found for this campaign' });
     }
 
+    /* Drop prospects the re-contact policy protects.
+     *
+     * Prospecting the same category day after day otherwise means emailing
+     * the same businesses every run. The exclusions are reported back rather
+     * than applied silently: a campaign that quietly shrinks from 120 targets
+     * to 12 looks broken, and the customer needs to know it is the policy
+     * working, not the product failing. */
+    const requested = targets.map((t) => t.id);
+
+    /* Classify prospects an email campaign cannot reach, before it launches.
+     *
+     * A campaign of 111 prospects that all lack an address burns one of the
+     * two waves a campaign gets and produces 111 failures. Sorting them here
+     * puts them in the column that fits — needs a phone call, or nothing left
+     * to try — and leaves the campaign targeting only people it can actually
+     * email. The send loop keeps its own version of this for prospects that
+     * lose their address between queueing and sending. */
+    const unreachable = { callOnly: 0, lost: 0 };
+    if (channelCheck.channel === 'email' && requested.length) {
+      const rows = await db.all(
+        `SELECT id, phone FROM leads
+          WHERE id IN (${requested.map(() => '?').join(',')})
+            AND COALESCE(email, '') = ''`,
+        ...requested
+      );
+      for (const row of rows) {
+        const next = row.phone ? 'Call Only' : 'Closed Lost';
+        await db.run(
+          "UPDATE leads SET status = ? WHERE id = ? AND status IN ('New', 'Call Only')",
+          next, row.id
+        );
+        await db.run(
+          'INSERT INTO lead_discussions (lead_id, type, content) VALUES (?, ?, ?)',
+          row.id,
+          'Note',
+          row.phone
+            ? `Campagne « ${name} » — aucune adresse e-mail, à contacter par téléphone`
+            : `Campagne « ${name} » — ni e-mail ni téléphone, prospect inexploitable`
+        ).catch((err) => {
+          // The journal records what happened; it is not a precondition for
+          // it. Never let a failed note stop a campaign being built.
+          console.error(`Campaign: could not record note for lead ${row.id}:`, err.message);
+        });
+        if (row.phone) unreachable.callOnly++; else unreachable.lost++;
+      }
+      const excludedIds = new Set(rows.map((r) => r.id));
+      targets = targets.filter((t) => !excludedIds.has(t.id));
+    }
+
+    if (targets.length === 0) {
+      return res.status(400).json({
+        error: "Aucun prospect de cette sélection n'a d'adresse e-mail.",
+        detail: {
+          requested: requested.length,
+          movedToCallOnly: unreachable.callOnly,
+          movedToLost: unreachable.lost
+        }
+      });
+    }
+
+    const { eligible, blocked } = await partitionEligible(db, targets.map((t) => t.id));
+
+    const cooling = blocked.filter((b) => b.reason === BLOCK_REASONS.COOLDOWN);
+    const exhausted = blocked.filter((b) => b.reason === BLOCK_REASONS.MAX_ATTEMPTS);
+
+    if (eligible.length === 0) {
+      const soonest = cooling.length
+        ? Math.min(...cooling.map((b) => b.daysRemaining ?? RECONTACT_COOLDOWN_DAYS))
+        : null;
+      return res.status(400).json({
+        error: 'Aucun prospect éligible pour cette campagne.',
+        detail: {
+          requested: requested.length,
+          cooling: cooling.length,
+          exhausted: exhausted.length,
+          nextEligibleInDays: soonest,
+          cooldownDays: RECONTACT_COOLDOWN_DAYS,
+          maxAttempts: MAX_CONTACT_ATTEMPTS
+        }
+      });
+    }
+
+    targets = eligible.map((id) => ({ id }));
+
     // Insert Campaign
     const result = await db.run(
       'INSERT INTO campaigns (user_id, name, template_id, total_leads, channel) VALUES (?, ?, ?, ?, ?)',
@@ -1068,7 +1170,21 @@ router.post('/campaigns', async (req, res) => {
     }
 
     const newCampaign = await db.get('SELECT * FROM campaigns WHERE id = ?', campaignId);
-    res.status(201).json(newCampaign);
+    res.status(201).json({
+      ...newCampaign,
+      // What the policy removed, so the UI can say so instead of leaving the
+      // customer to wonder where their targets went.
+      excluded: {
+        requested: requested.length,
+        queued: eligible.length,
+        cooling: cooling.length,
+        exhausted: exhausted.length,
+        noEmailCallOnly: unreachable.callOnly,
+        noEmailLost: unreachable.lost,
+        cooldownDays: RECONTACT_COOLDOWN_DAYS,
+        maxAttempts: MAX_CONTACT_ATTEMPTS
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1131,13 +1247,121 @@ router.post('/campaigns/:id/start', async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    // Update status to Active
-    await db.run("UPDATE campaigns SET status = 'Active' WHERE id = ? AND user_id = ?", id, req.user.id);
+    // Counts the wave. run_count and last_run_at are what the relaunch rule
+    // reads, and they are stamped here rather than when the background run
+    // finishes: a run that is still going has unmistakably gone out.
+    await db.run(
+      "UPDATE campaigns SET status = 'Active', run_count = run_count + 1, last_run_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+      id, req.user.id
+    );
 
     // Trigger in the background
     runCampaignBackground(parseInt(id));
 
     res.json({ message: 'Campaign started in background' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+/* Relaunch: a second outreach wave for the same campaign.
+ *
+ * Distinct from /restart, which retries a run that failed. A relaunch is new
+ * outreach, so it obeys the same numbers as the per-prospect rule and is
+ * capped at MAX_CAMPAIGN_RUNS.
+ *
+ * It queues NEW log rows rather than resetting the old ones. /restart flips
+ * every row back to Pending, which would erase the record of who was already
+ * emailed — and that record is exactly what the per-prospect policy counts.
+ * A relaunch that wiped it would let the same person be emailed indefinitely.
+ */
+router.post('/campaigns/:id/relaunch', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await getDb();
+    const campaign = await loadCampaignForStart(db, id, req.user.id);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campagne introuvable.' });
+    }
+
+    const standing = describeRelaunch(campaign);
+    if (!standing.canRelaunch) {
+      const message = standing.state === 'complete'
+        ? `Cette campagne a déjà été envoyée ${MAX_CAMPAIGN_RUNS} fois. Elle est terminée.`
+        : standing.state === 'never_run'
+          ? "Cette campagne n'a pas encore été lancée."
+          : `Relance possible dans ${standing.daysRemaining} jour(s).`;
+      return res.status(400).json({ error: message, relaunch: standing });
+    }
+
+    try {
+      assertChannelSendable(campaign, campaign.channel || 'email');
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    /* A relaunch chases the people who were emailed and have not answered,
+     * which is exactly the "Contacté" column.
+     *
+     * Not everyone the campaign ever touched: the prospects it moved to
+     * "Appel uniquement" have no address, so re-queueing them would only
+     * fail again, and the ones moved to "Perdu" have nothing left to try.
+     * Anyone the salesperson has since advanced to "RDV fixé" or beyond has
+     * answered — chasing them with the same email would be the worst
+     * possible follow-up.
+     *
+     * Then the per-prospect rule on top, for the four-day delay and the
+     * two-contact cap. */
+    const previous = await db.all(
+      `SELECT DISTINCT cl.lead_id
+         FROM campaign_logs cl
+         JOIN leads l ON l.id = cl.lead_id
+        WHERE cl.campaign_id = ?
+          AND l.status = 'Contacted'`,
+      id
+    );
+
+    if (previous.length === 0) {
+      return res.status(400).json({
+        error: "Aucun prospect de cette campagne n'est en attente de relance.",
+        detail: { reason: 'La relance ne concerne que les prospects encore au statut « Contacté ».' }
+      });
+    }
+
+    const { eligible, blocked } = await partitionEligible(db, previous.map((r) => r.lead_id));
+
+    if (eligible.length === 0) {
+      return res.status(400).json({
+        error: 'Aucun prospect de cette campagne ne peut être recontacté.',
+        detail: { requested: previous.length, blocked: blocked.length }
+      });
+    }
+
+    for (const leadId of eligible) {
+      await db.run(
+        "INSERT INTO campaign_logs (campaign_id, lead_id, status) VALUES (?, ?, 'Pending')",
+        id, leadId
+      );
+    }
+
+    await db.run(
+      `UPDATE campaigns
+          SET status = 'Active', run_count = run_count + 1, last_run_at = CURRENT_TIMESTAMP,
+              total_leads = total_leads + ?
+        WHERE id = ? AND user_id = ?`,
+      eligible.length, id, req.user.id
+    );
+
+    runCampaignBackground(parseInt(id));
+
+    res.json({
+      message: 'Relance lancée.',
+      queued: eligible.length,
+      skipped: blocked.length,
+      run: Number(campaign.run_count ?? 0) + 1,
+      maxRuns: MAX_CAMPAIGN_RUNS
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

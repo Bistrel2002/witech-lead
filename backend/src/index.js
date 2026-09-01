@@ -11,6 +11,7 @@ import sesWebhookRouter from './routes/sesWebhookRoutes.js';
 import unsubscribeRouter from './routes/unsubscribeRoutes.js';
 import { getDb } from './database/db.js';
 import { getPlatformConfig } from './config/platformConfig.js';
+import { lapseSilentProspects, NO_REPLY_LAPSE_DAYS } from './services/outreachPolicy.js';
 import { authenticateUser } from './middlewares/authMiddleware.js';
 
 // Resolve the env file from this file's own location, never from the current
@@ -107,6 +108,29 @@ async function bootstrap() {
     console.log("Initializing database connection...");
     const db = await getDb();
     console.log("Database initialized successfully!");
+
+    /* Close prospects that were contacted and never moved.
+     *
+     * Runs once at boot and every six hours after that. The sweep is a plain
+     * conditional UPDATE, so running it more often than needed costs nothing
+     * and two instances running it at once cannot corrupt anything. Six hours
+     * is fine granularity for a fourteen-day rule; a missed tick just means a
+     * prospect lapses a few hours later than it could have.
+     *
+     * The timer is unref'd so it can never hold the process open during a
+     * shutdown. */
+    const sweep = async () => {
+      try {
+        const closed = await lapseSilentProspects(db);
+        if (closed > 0) {
+          console.log(`Outreach: ${closed} prospect(s) sans réponse depuis ${NO_REPLY_LAPSE_DAYS} jours -> Perdu`);
+        }
+      } catch (err) {
+        console.error('Outreach: lapse sweep failed:', err.message);
+      }
+    };
+    sweep();
+    setInterval(sweep, 6 * 60 * 60 * 1000).unref();
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);

@@ -1,0 +1,199 @@
+/* Design tokens for Witech Lead.
+ *
+ * Every visual value lives here as a custom property. Components never
+ * hard-code a colour: they read a token, which is what makes the second
+ * theme a second set of values rather than a second design.
+ *
+ * Palette derived from the Wi'Tech logo: magenta -> violet gradient on a
+ * deep near-black. Magenta is reserved for action; it must never be used
+ * to decorate data.
+ */
+
+:root {
+  /* Brand — identical in both themes, this is the logo */
+  --wt-brand-500: #c026d3;
+  --wt-brand-600: #a21caf;
+  --wt-brand-700: #9333ea;
+  --wt-brand-300: #e879f9;
+  --wt-brand-100: #f5d0fe;
+  --wt-gradient: linear-gradient(135deg, #c026d3 0%, #9333ea 100%);
+
+  /* Semantic.
+   *
+   * Three tokens per meaning, and they are not interchangeable:
+   *
+   *   --wt-x          semantic TEXT (and icons, and borders) directly on
+   *                   --wt-bg / --wt-surface / --wt-surface-2. This is what
+   *                   a page author reaches for to write an error message,
+   *                   a warning line or a success note outside a badge —
+   *                   `text-danger`, `text-success`, `text-warning`, which
+   *                   Tailwind exposes from the @theme block below.
+   *   --wt-x-soft     the tinted BACKGROUND of a badge or callout.
+   *   --wt-x-fg       text ON that tinted background. Never on a plain
+   *                   surface: in light it is nearly black, in dark it is
+   *                   nearly white, and both only work over -soft.
+   *
+   * All three are theme-aware. The base token used to be declared once here
+   * and inherited unchanged by the dark theme, which put danger text at
+   * 3.59:1 on --wt-surface-2 in dark and warning at 2.96:1 on --wt-bg in
+   * light. Values below are measured against every surface of their own
+   * theme; the worst cell of each is noted.
+   */
+  --wt-success: #15803d;      /* light: 4.66 bg / 5.02 surface / 4.78 surface-2 */
+  --wt-success-soft: #dcfce7;
+  --wt-success-fg: #166534;
+  --wt-danger: #d11f1f;       /* light: 4.97 / 5.35 / 5.10 */
+  --wt-danger-soft: #fee2e2;
+  --wt-danger-fg: #7f1d1d;
+  --wt-warning: #a5580b;      /* light: 4.88 / 5.25 / 5.00 */
+  --wt-warning-soft: #fef3c7;
+  --wt-warning-fg: #78350f;
+
+  /* Typography */
+  /* Bricolage Grotesque is a variable grotesque with optical sizing: it
+   * carries personality at display sizes where Outfit read as the default
+   * geometric sans every SaaS uses. Used for headings only — Inter still
+   * sets every paragraph. */
+  --wt-font-display: 'Bricolage Grotesque', 'Outfit', system-ui, sans-serif;
+  --wt-font-body: 'Inter', system-ui, sans-serif;
+
+  /* Spacing scale */
+  --wt-space-1: 0.25rem;
+  --wt-space-2: 0.5rem;
+  --wt-space-3: 0.75rem;
+  --wt-space-4: 1rem;
+  --wt-space-6: 1.5rem;
+  --wt-space-8: 2rem;
+  --wt-space-12: 3rem;
+
+  /* Radii */
+  --wt-radius-sm: 0.5rem;
+  --wt-radius: 0.75rem;
+  --wt-radius-lg: 1rem;
+  --wt-radius-xl: 1.25rem;
+
+  /* Light theme surfaces and text — the default */
+  --wt-bg: #f7f6fa;
+  --wt-surface: #ffffff;
+  --wt-surface-2: #faf9fc;
+  --wt-line: #e6e1ee;
+  --wt-fg: #1a1626;           /* 16.45 bg / 17.70 surface / 16.87 surface-2 */
+  --wt-fg-muted: #5a5273;     /*  6.76 /  7.27 /  6.93 */
+  --wt-fg-subtle: #6f6885;    /*  4.89 /  5.26 /  5.01 — AA at the floor */
+  --wt-accent: var(--wt-brand-600);
+  --wt-accent-fg: #ffffff;
+  --wt-accent-soft: #fae8ff;
+  --wt-shadow: 0 1px 2px rgba(26, 22, 38, .06), 0 1px 3px rgba(26, 22, 38, .04);
+  --wt-shadow-lg: 0 10px 30px rgba(26, 22, 38, .10);
+
+  /* The navigation rail is dark in both themes — it carries the brand */
+  --wt-rail-bg: #140f1e;
+  --wt-rail-fg: #cfc6dd;
+  --wt-rail-fg-active: #ffffff;
+  --wt-rail-line: #2a2038;
+}
+
+:root[data-theme='dark'] {
+  --wt-bg: #0d0a14;
+  --wt-surface: #17111f;
+  --wt-surface-2: #1e1729;
+  --wt-line: #2d2440;
+  --wt-fg: #f2ecfa;           /* 16.96 bg / 15.98 surface / 15.01 surface-2 */
+  --wt-fg-muted: #a99fbd;     /*  7.83 /  7.38 /  6.93 */
+  --wt-fg-subtle: #948aa9;    /*  6.04 /  5.69 /  5.35 */
+  --wt-accent: var(--wt-brand-300);
+  --wt-accent-fg: #1a0620;
+  --wt-accent-soft: #2b1436;
+  --wt-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+  --wt-shadow-lg: 0 12px 34px rgba(0, 0, 0, .55);
+
+  --wt-rail-bg: #120d1a;
+  --wt-rail-fg: #b9aecb;
+  --wt-rail-fg-active: #ffffff;
+  --wt-rail-line: #251c33;
+
+  /* Semantic text/icon/border colours, re-measured for the dark surfaces.
+   * The light values are far too dark to read here — #15803d lands at 3.46
+   * on --wt-surface-2 and #a5580b at 3.31 — so all three are overridden,
+   * not just the -soft/-fg pair. */
+  --wt-success: #4ade80;      /* dark: 11.26 bg / 10.60 surface / 9.96 surface-2 */
+  --wt-success-soft: #082f1a;
+  --wt-success-fg: #86efac;
+  --wt-danger: #f87171;       /* dark:  7.09 /  6.68 /  6.28 */
+  --wt-danger-soft: #3b0d0d;
+  --wt-danger-fg: #fca5a5;
+  --wt-warning: #fbbf24;      /* dark: 11.75 / 11.07 / 10.40 */
+  --wt-warning-soft: #3a2606;
+  --wt-warning-fg: #fde047;
+}
+
+/* Expose the tokens to Tailwind so `bg-surface`, `text-fg-muted`,
+ * `border-line` etc. exist as utilities and theme themselves. */
+@theme inline {
+  --color-bg: var(--wt-bg);
+  --color-surface: var(--wt-surface);
+  --color-surface-2: var(--wt-surface-2);
+  --color-line: var(--wt-line);
+  --color-fg: var(--wt-fg);
+  --color-fg-muted: var(--wt-fg-muted);
+  --color-fg-subtle: var(--wt-fg-subtle);
+  --color-accent: var(--wt-accent);
+  --color-accent-fg: var(--wt-accent-fg);
+  --color-accent-soft: var(--wt-accent-soft);
+  --color-brand-300: var(--wt-brand-300);
+  --color-brand-500: var(--wt-brand-500);
+  --color-brand-600: var(--wt-brand-600);
+  --color-brand-700: var(--wt-brand-700);
+  --color-success: var(--wt-success);
+  --color-danger: var(--wt-danger);
+  --color-warning: var(--wt-warning);
+  --color-rail: var(--wt-rail-bg);
+  --font-display: var(--wt-font-display);
+  --font-body: var(--wt-font-body);
+  --radius-wt: var(--wt-radius);
+  --radius-wt-lg: var(--wt-radius-lg);
+}
+
+/* Page defaults live in @layer base so that any Tailwind utility on <html>
+ * or <body> wins over them, the same way Tailwind's own preflight behaves. */
+@layer base {
+  html {
+    background: var(--wt-bg);
+    color: var(--wt-fg);
+    font-family: var(--wt-font-body);
+    color-scheme: light;
+  }
+
+  html[data-theme='dark'] {
+    color-scheme: dark;
+  }
+}
+
+/* The theme swap should feel deliberate, not jarring.
+ *
+ * This rule is deliberately NOT permanent. Setting the `transition`
+ * *shorthand* on `body *` resets `transition-property` on every element in
+ * the document, and because the rule is unlayered it outranks every Tailwind
+ * utility — so a standing version of it silently disables every
+ * `transition-*` / `duration-*` class in the entire app, with no visible
+ * cause. `useTheme` instead adds `.wt-theme-switching` to <html> for the
+ * length of the swap and removes it again, so the cross-fade happens only
+ * while the theme is actually changing.
+ *
+ * It stays unlayered on purpose: during those ~200ms it must beat the
+ * component's own `transition-*` utility, and unlayered always outranks
+ * layered. */
+html.wt-theme-switching,
+html.wt-theme-switching body,
+html.wt-theme-switching body * {
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease;
+}
+
+/* Respect a reduced-motion preference: swap the theme instantly. */
+@media (prefers-reduced-motion: reduce) {
+  html.wt-theme-switching,
+  html.wt-theme-switching body,
+  html.wt-theme-switching body * {
+    transition: none;
+  }
+}
