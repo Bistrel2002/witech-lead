@@ -157,3 +157,35 @@ export async function lapseSilentProspects(db) {
   }
   return rows.length;
 }
+
+/**
+ * The outreach standing of one prospect, shaped for display.
+ *
+ * Derived here rather than in the browser so the interface never restates
+ * the rule. If the cooldown or the cap changes, the badge follows without
+ * anyone remembering to update it.
+ */
+export function describeOutreach(entry, now = new Date()) {
+  const attempts = entry?.attempts ?? 0;
+  const verdict = evaluate(entry, now);
+  return {
+    attempts,
+    maxAttempts: MAX_CONTACT_ATTEMPTS,
+    lastSentAt: entry?.lastSentAt ? entry.lastSentAt.toISOString() : null,
+    eligible: verdict.ok,
+    reason: verdict.reason ?? null,
+    // Only meaningful while waiting out the cooldown; null once the prospect
+    // is either sendable or out of attempts for good.
+    daysUntilRecontact: verdict.daysRemaining ?? null
+  };
+}
+
+/** Attach describeOutreach() to each lead, in one query for the whole set. */
+export async function withOutreach(db, leads, now = new Date()) {
+  if (!leads.length) return leads;
+  const state = await getOutreachState(db, leads.map((l) => l.id));
+  return leads.map((lead) => ({
+    ...lead,
+    outreach: describeOutreach(state.get(Number(lead.id)), now)
+  }));
+}

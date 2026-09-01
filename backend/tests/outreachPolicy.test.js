@@ -4,6 +4,8 @@ import {
   evaluate,
   partitionEligible,
   lapseSilentProspects,
+  describeOutreach,
+  withOutreach,
   BLOCK_REASONS,
   RECONTACT_COOLDOWN_DAYS,
   MAX_CONTACT_ATTEMPTS,
@@ -158,4 +160,59 @@ test('a failed note never stops the sweep', async () => {
     return realRun(sql, ...params);
   };
   assert.equal(await lapseSilentProspects(db), 2);
+});
+
+// --- describeOutreach: what the badge is built from -------------------------
+
+test('a prospect never contacted reports nothing to show', () => {
+  const d = describeOutreach(undefined, NOW);
+  assert.equal(d.attempts, 0);
+  assert.equal(d.eligible, true);
+  assert.equal(d.daysUntilRecontact, null);
+});
+
+test('after a first send the badge counts 1 and the days left', () => {
+  const d = describeOutreach({ attempts: 1, lastSentAt: daysAgo(1) }, NOW);
+  assert.equal(d.attempts, 1);
+  assert.equal(d.maxAttempts, MAX_CONTACT_ATTEMPTS);
+  assert.equal(d.eligible, false);
+  assert.equal(d.daysUntilRecontact, RECONTACT_COOLDOWN_DAYS - 1);
+});
+
+test('once the cooldown is served the countdown disappears', () => {
+  // The badge must stop saying "relance dans 0 j" and start saying the
+  // prospect can be worked again.
+  const d = describeOutreach({ attempts: 1, lastSentAt: daysAgo(RECONTACT_COOLDOWN_DAYS + 1) }, NOW);
+  assert.equal(d.eligible, true);
+  assert.equal(d.daysUntilRecontact, null);
+});
+
+test('after the second send there is no countdown, only the cap', () => {
+  const d = describeOutreach({ attempts: MAX_CONTACT_ATTEMPTS, lastSentAt: daysAgo(1) }, NOW);
+  assert.equal(d.attempts, MAX_CONTACT_ATTEMPTS);
+  assert.equal(d.eligible, false);
+  assert.equal(d.reason, BLOCK_REASONS.MAX_ATTEMPTS);
+  assert.equal(d.daysUntilRecontact, null);
+});
+
+test('withOutreach decorates a whole list in one query', async () => {
+  const db = fakeDb([
+    { lead_id: 1, sent_at: daysAgo(2) },
+    { lead_id: 3, sent_at: daysAgo(8) }, { lead_id: 3, sent_at: daysAgo(6) }
+  ]);
+  const decorated = await withOutreach(db, [{ id: 1 }, { id: 2 }, { id: 3 }], NOW);
+
+  assert.equal(decorated[0].outreach.attempts, 1);
+  assert.equal(decorated[0].outreach.daysUntilRecontact, RECONTACT_COOLDOWN_DAYS - 2);
+  assert.equal(decorated[1].outreach.attempts, 0);
+  assert.equal(decorated[2].outreach.reason, BLOCK_REASONS.MAX_ATTEMPTS);
+
+  // One aggregate for the page, not one query per row.
+  assert.equal(db.calls.filter((c) => /FROM campaign_logs/i.test(c.sql)).length, 1);
+});
+
+test('withOutreach leaves an empty list alone', async () => {
+  const db = fakeDb([]);
+  assert.deepEqual(await withOutreach(db, [], NOW), []);
+  assert.equal(db.calls.length, 0);
 });

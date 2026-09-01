@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
+  Send,
   Search, 
   Filter, 
   Globe, 
@@ -33,6 +34,50 @@ import {
   MessageCircle,
   Play
 } from 'lucide-react';
+
+/* Where a prospect stands against the re-contact policy.
+ *
+ * Everything shown here is computed on the server (leads carry an `outreach`
+ * object): the interface must not restate a rule that lives in one place, or
+ * changing the cooldown means remembering to change it here too.
+ *
+ * Silent for a prospect never contacted — an empty pipeline covered in "0/2"
+ * badges is noise, and the absence of the badge already says it. */
+function OutreachBadge({ outreach, className = '' }) {
+  if (!outreach || outreach.attempts === 0) return null;
+
+  const { attempts, maxAttempts, daysUntilRecontact, eligible } = outreach;
+  const exhausted = attempts >= maxAttempts;
+
+  /* Prospects contacted before the policy existed can exceed the cap. "3/2"
+   * is accurate but reads as a broken counter, so past the cap the badge
+   * states the count plainly instead of pretending to be a ratio. */
+  const count = attempts > maxAttempts ? `${attempts} envois` : `${attempts}/${maxAttempts}`;
+
+  const detail = exhausted
+    ? 'quota atteint'
+    : eligible
+      ? 'relance possible'
+      : `relance dans ${daysUntilRecontact} j`;
+
+  return (
+    <span
+      title={`Contacté ${attempts} fois (maximum ${maxAttempts}) — ${detail}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5
+        text-3xs font-semibold ${
+          exhausted
+            ? 'bg-surface-2 text-fg-muted'
+            : eligible
+              ? 'bg-[var(--wt-success-soft)] text-[var(--wt-success-fg)]'
+              : 'bg-[var(--wt-warning-soft)] text-[var(--wt-warning-fg)]'
+        } ${className}`}
+    >
+      <Send className="w-3 h-3" />
+      {count}
+      <span className="font-normal opacity-90">· {detail}</span>
+    </span>
+  );
+}
 
 const PIPELINE_STATUSES = [
   'New',
@@ -1223,6 +1268,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                           </span>
                         </div>
 
+                        <OutreachBadge outreach={lead.outreach} />
+
                         {lead.city && (
                           <div className="flex items-center gap-1 text-[11px] text-fg-muted">
                             <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
@@ -1300,9 +1347,12 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                         </td>
                         <td className="p-4 font-bold text-fg">{lead.name}</td>
                         <td className="p-4">
-                          <span className="inline-block bg-accent-soft text-accent border border-line rounded-full px-2.5 py-0.5 text-2xs font-semibold">
-                            {lead.category}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-block bg-accent-soft text-accent border border-line rounded-full px-2.5 py-0.5 text-2xs font-semibold">
+                              {lead.category}
+                            </span>
+                            <OutreachBadge outreach={lead.outreach} />
+                          </div>
                         </td>
                         <td className="p-4 text-fg-muted">
                           <span className="inline-flex items-center gap-1 text-xs">

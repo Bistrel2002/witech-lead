@@ -4,6 +4,7 @@ import { scrapeWebsite, scrapeGoogleMapsFromLink } from './services/scraperServi
 import { runCampaignBackground, assertChannelSendable, SMS_UNAVAILABLE_MESSAGE } from './services/emailService.js';
 import {
   partitionEligible,
+  withOutreach,
   BLOCK_REASONS,
   RECONTACT_COOLDOWN_DAYS,
   MAX_CONTACT_ATTEMPTS
@@ -459,7 +460,9 @@ router.get('/leads', async (req, res) => {
 
     query += ' ORDER BY id DESC';
     const leads = await db.all(query, ...params);
-    res.json(leads);
+    // How many times each prospect has been emailed and when it may be
+    // emailed again, so the list can show it without a second round trip.
+    res.json(await withOutreach(db, leads));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
