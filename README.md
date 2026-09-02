@@ -13,6 +13,7 @@ prospect du premier contact à l'affaire signée.
 - [Lancer avec Docker](#lancer-avec-docker--recommandé-obligatoire-sur-windows)
 - [Lancer sans Docker](#lancer-sans-docker--macos--linux)
 - [Configuration (`.env`)](#configuration-env)
+- [**Aller jusqu'à l'envoi automatique des e-mails**](#aller-jusquà-lenvoi-automatique-des-e-mails)
 - [Tests](#tests)
 - [Scripts de maintenance](#scripts-de-maintenance)
 - [Problèmes fréquents](#problèmes-fréquents)
@@ -81,6 +82,11 @@ Le backend annonce clairement ce qui manque :
     Variables manquantes : AWS_REGION, MAIL_ROOT_DOMAIN, ...
 ⚠️  JWT_SECRET absent — clé aléatoire générée pour ce démarrage.
 ```
+
+> **Ces deux avertissements sont normaux sur une nouvelle installation.**
+> Pour les lever et activer l'envoi réel :
+> **→ [Aller jusqu'à l'envoi automatique des e-mails](#aller-jusquà-lenvoi-automatique-des-e-mails)**
+> — la liste complète de ce qu'il reste à obtenir, où, et en combien de temps.
 
 Ce que vous avez sans rien configurer : inscription, connexion, recherche de
 prospects, pipeline, campagnes, tableau de bord. Ce qui manque : l'envoi réel
@@ -305,7 +311,9 @@ Générez les deux secrets vous-même :
 openssl rand -hex 32
 ```
 
-Voir `docs/platform-setup.md` pour la mise en place AWS complète.
+**→ [Aller jusqu'à l'envoi automatique des e-mails](#aller-jusquà-lenvoi-automatique-des-e-mails)** pour la
+marche à suivre complète, et `docs/platform-setup.md` pour le détail AWS pas à
+pas.
 
 > `.env` est ignoré par Git. Ne le committez jamais.
 
