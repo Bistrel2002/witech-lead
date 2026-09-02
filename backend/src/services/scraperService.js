@@ -244,7 +244,15 @@ export async function scrapeGoogleMapsFromLink(mapsUrl, category, city, radius =
 
   console.log(`[Node backend]: Spawning Playwright Python Scraper for Category: "${finalCategory}", City: "${finalCity}", Limit: ${maxLeads}`);
 
-  const pythonBin = path.resolve(__dirname, '../../../venv/bin/python3');
+  /* Where the Python interpreter lives.
+   *
+   * The path used to be hardcoded to <repo>/venv/bin/python3, which exists on
+   * exactly one machine: the one where somebody created that virtualenv by
+   * hand. Render deploys with rootDir: backend, so it resolves above the
+   * deploy root and the spawn fails; the Docker image has no Python at all.
+   * PYTHON_BIN makes it configurable without touching code. */
+  const pythonBin = process.env.PYTHON_BIN
+    || path.resolve(__dirname, '../../../venv/bin/python3');
   const pythonScript = path.resolve(__dirname, './scraper.py');
 
   return new Promise((resolve, reject) => {

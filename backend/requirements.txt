@@ -1,0 +1,16 @@
+# Dépendances du scraper Python (backend/src/services/scraper.py).
+#
+# Sans ce fichier le venv n'était reproductible nulle part : il existait
+# uniquement sur la machine où il avait été créé à la main, et rien n'indiquait
+# quoi installer.
+#
+#   python3 -m venv venv
+#   ./venv/bin/pip install -r backend/requirements.txt
+#   ./venv/bin/playwright install chromium
+#
+# Playwright a besoin d'un vrai navigateur : la dernière commande n'est pas
+# optionnelle, et c'est elle qui manque le plus souvent.
+beautifulsoup4==4.15.0
+playwright==1.60.0
+requests==2.34.2
+soupsieve==2.8.4
