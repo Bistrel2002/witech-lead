@@ -1,24 +1,26 @@
-# Use Playwright base image (Ubuntu jammy with preinstalled browser deps)
-FROM mcr.microsoft.com/playwright:v1.44.0-jammy
+# Backend API — Node 20 on Debian slim.
+#
+# Slim rather than Alpine: pg and bcryptjs build against glibc without the
+# extra toolchain Alpine needs for their native parts.
+FROM node:20-slim
+
+# Puppeteer is declared in package.json but never imported anywhere in
+# backend/src — the scraping path uses axios + cheerio. Skipping its browser
+# download keeps roughly 170 MB of Chromium out of the image. Remove this if
+# the scraper is ever rewritten to drive a real browser.
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    NODE_ENV=production
 
 WORKDIR /app
 
-# Copy dependency configs
+# Dependencies first, so a source change does not reinstall everything.
 COPY package*.json ./
+RUN npm install --omit=dev
 
-# Install Node packages
-RUN npm install
-
-# Install Python and build virtual environment (matching local structure)
-RUN apt-get update && apt-get install -y python3-venv python3-pip && rm -rf /var/lib/apt/lists/*
-RUN python3 -m venv venv
-RUN ./venv/bin/pip install --upgrade pip
-RUN ./venv/bin/pip install playwright beautifulsoup4 requests
-RUN ./venv/bin/playwright install chromium
-
-# Copy backend files
 COPY . .
 
 EXPOSE 3001
 
-CMD ["npm", "start"]
+# Not `npm start`: node as PID 1 receives SIGTERM directly, so the container
+# stops promptly instead of waiting out Docker's kill timeout.
+CMD ["node", "src/index.js"]

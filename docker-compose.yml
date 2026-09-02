@@ -1,94 +1,64 @@
-version: '3.8'
+# Run the whole stack with one command, on any machine that has Docker.
+#
+#   docker compose up --build
+#
+# Nothing else needs installing — no Node, no PostgreSQL. This exists mainly
+# so the project starts identically on Windows, where the native setup trips
+# over path handling and the root `npm run dev` script.
 
 services:
-  # 1. Database (PostgreSQL)
-  postgres:
-    image: postgres:15-alpine
-    container_name: witech-postgres
-    restart: always
+  db:
+    image: postgres:16-alpine
     environment:
-      POSTGRES_USER: crm_admin
-      POSTGRES_PASSWORD: crm_secure_password
+      POSTGRES_USER: witech
+      POSTGRES_PASSWORD: witech
       POSTGRES_DB: witech_crm
-    ports:
-      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  # 2. HashiCorp Vault (Centralized Secret Management)
-  vault:
-    image: hashicorp/vault:latest
-    container_name: witech-vault
-    restart: always
+      - witech-db:/var/lib/postgresql/data
     ports:
-      - "8200:8200"
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: witech-vault-token
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-    cap_add:
-      - IPC_LOCK
-    command: server -dev
+      # Exposed so you can inspect the database from the host with psql or a
+      # GUI. 5433 on purpose: it will not collide with a PostgreSQL already
+      # installed on the machine.
+      - "5433:5432"
+    healthcheck:
+      # The backend awaits getDb() before it listens, so starting it against
+      # a database still initialising means a container that never binds its
+      # port. It waits for this to pass instead.
+      test: ["CMD-SHELL", "pg_isready -U witech -d witech_crm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
-  # 3. MinIO (Local S3-compatible Archive Storage)
-  minio:
-    image: minio/minio:latest
-    container_name: witech-minio
-    restart: always
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: backup_admin
-      MINIO_ROOT_PASSWORD: minio_secure_password
-    volumes:
-      - minio_data:/data
-
-  # 4. Backend (Express Node.js API + Python Playwright Scraper)
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: witech-backend
-    restart: always
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever .env says: inside the compose network the database
+      # answers to `db`, never to localhost.
+      DATABASE_URL: postgresql://witech:witech@db:5432/witech_crm
+      PORT: 3001
+      NODE_ENV: development
+      BACKEND_URL: http://localhost:3001
+      FRONTEND_URL: http://localhost:8080
     ports:
       - "3001:3001"
-    environment:
-      PORT: 3001
-      NODE_ENV: production
-      DATABASE_URL: postgresql://crm_admin:crm_secure_password@postgres:5432/witech_crm
-      FRENCH_DB_URL: postgresql://crm_admin:crm_secure_password@postgres:5432/witech_crm # Can point to external DB in prod
-      JWT_SECRET: witech-crm-token-key-2026
-      ADMIN_PORTAL_PASSWORD: admin123
-      TEAM_PORTAL_PASSWORD: team123
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: witech-vault-token
-      VAULT_SECRET_PATH: witech-crm
-      S3_ENDPOINT: http://minio:9000
-      S3_BUCKET: witech-backups
-      S3_ACCESS_KEY_ID: backup_admin
-      S3_SECRET_ACCESS_KEY: minio_secure_password
-      S3_REGION: us-east-1
-      VITE_MOCK_AUTH: "false"
-    depends_on:
-      - postgres
-      - vault
-      - minio
 
-  # 5. Frontend (React SPA Served by Nginx)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    container_name: witech-frontend
-    restart: always
-    ports:
-      - "80:80"
-    environment:
-      - VITE_API_URL=http://localhost:3001
+      args:
+        # The browser resolves this, so it is the host's address for the
+        # backend — not the compose service name, which means nothing outside
+        # the network.
+        VITE_API_URL: http://localhost:3001
     depends_on:
       - backend
+    ports:
+      - "8080:80"
 
 volumes:
-  postgres_data:
-  minio_data:
+  witech-db:
