@@ -328,6 +328,38 @@ Pour qu'un tiers puisse envoyer, deux voies :
 Un développeur qui reprend le projet n'a de toute façon pas besoin d'envoyer
 pour travailler : tout le reste tourne sans ces variables.
 
+### La configuration AWS ne se refait jamais
+
+Elle est faite **une fois**, et elle vit dans votre compte AWS — pas dans le
+dépôt, pas sur une machine. Zone Route53, utilisateur IAM, accès production
+SES, configuration set et topic SNS : tout cela reste en place quoi qu'il
+arrive au code.
+
+| Situation | Faut-il refaire la configuration AWS ? |
+|---|---|
+| Vous déployez sur un nouveau serveur | **Non.** Vous recopiez le `.env`. |
+| Vous changez de machine | **Non.** Même `.env`. |
+| Un développeur clone pour coder | **Non.** Il n'a besoin d'aucune variable AWS. |
+| Un nouveau client s'inscrit sur votre instance | **Non**, et c'est automatique — voir ci-dessous. |
+| Quelqu'un veut exploiter **sa propre** instance | Oui. Son compte AWS, son domaine. |
+
+#### Les nouveaux clients ne configurent rien
+
+C'est la promesse du produit, et elle est tenue par le code : à chaque
+inscription, `ensureTenantSendingDomain` crée le sous-domaine du client
+(`<id>.mail.witechagency.com`), déclare l'identité SES, active DKIM et écrit
+les enregistrements DNS dans Route53 — sans intervention.
+
+Le client ne voit jamais AWS. Il crée son compte, et son domaine d'envoi
+existe.
+
+#### Si vous deviez tout refaire
+
+`docs/platform-setup.md` documente les six étapes, y compris les réponses
+prêtes à coller pour le formulaire d'accès production SES.
+`docs/infrastructure-expliquee.md` explique le rôle de chaque brique — SES,
+SNS, Route53, IAM — en langage non technique.
+
 ---
 
 ## Tests
