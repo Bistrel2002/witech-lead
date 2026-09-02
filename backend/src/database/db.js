@@ -280,27 +280,6 @@ async function initPostgresDb(db) {
     ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS run_count INTEGER DEFAULT 0;
     ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP;
 
-    -- Seed the new columns from evidence already in the database. Without
-    -- this every campaign that ever ran reads as "never launched", the
-    -- relaunch control never appears for any of them, and the feature is
-    -- silently inert on exactly the accounts that need it.
-    --
-    -- One wave, dated at the campaign's last activity: older data cannot tell
-    -- us how many waves there really were, and one is the conservative floor —
-    -- it makes the button appear and starts the cooldown from the last thing
-    -- that actually happened. Guarded on run_count = 0, so it seeds once and
-    -- never disturbs a campaign the application has since counted.
-    UPDATE campaigns c
-       SET run_count = 1,
-           last_run_at = s.last_activity
-      FROM (
-        SELECT campaign_id, MAX(sent_at) AS last_activity
-          FROM campaign_logs
-         WHERE status IN ('Sent', 'Failed', 'Skipped')
-         GROUP BY campaign_id
-      ) s
-     WHERE s.campaign_id = c.id
-       AND c.run_count = 0;
   `);
 
   // Create campaign_logs table
@@ -364,6 +343,37 @@ async function initPostgresDb(db) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribes_global
       ON unsubscribes(email) WHERE user_id IS NULL;
     CREATE INDEX IF NOT EXISTS idx_unsubscribes_email ON unsubscribes(email);
+  `);
+
+  /* Seed run_count / last_run_at from evidence already in the database.
+   *
+   * Deliberately here and not beside the ALTER that adds the columns: this
+   * statement reads campaign_logs, which is created further up only in the
+   * source order — on a fresh database the seed ran first and the whole boot
+   * aborted with 'relation "campaign_logs" does not exist'. It never showed
+   * on a database that already had the table, which is every developer
+   * machine that had run the app before. Docker on an empty volume is what
+   * surfaced it.
+   *
+   * Without the seed, every campaign that ever ran reads as "never launched",
+   * the relaunch control never appears, and the feature is silently inert.
+   *
+   * One wave, dated at the campaign's last activity: older data cannot say
+   * how many waves there really were, and one is the conservative floor.
+   * Guarded on run_count = 0, so it seeds once and never disturbs a campaign
+   * the application has since counted. */
+  await db.exec(`
+    UPDATE campaigns c
+       SET run_count = 1,
+           last_run_at = s.last_activity
+      FROM (
+        SELECT campaign_id, MAX(sent_at) AS last_activity
+          FROM campaign_logs
+         WHERE status IN ('Sent', 'Failed', 'Skipped')
+         GROUP BY campaign_id
+      ) s
+     WHERE s.campaign_id = c.id
+       AND c.run_count = 0;
   `);
 
   // Create lead_discussions table

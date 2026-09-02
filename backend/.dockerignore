@@ -1,0 +1,24 @@
+# Keeps the build context small. Without this Docker uploads node_modules to
+# the daemon — 120 MB and ~15 000 files per service — only for the image to
+# throw it away and run its own npm install. It was the single reason a build
+# spent minutes on "load build context" before compiling anything.
+node_modules
+npm-debug.log*
+
+# Build output: regenerated inside the image.
+dist
+build
+
+# Secrets must never be baked into an image layer.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
+README.md
+coverage
+*.log
+.DS_Store
