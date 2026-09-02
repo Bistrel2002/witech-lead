@@ -6,15 +6,31 @@
  * stored in the `settings` table.
  */
 
+/* What sending genuinely cannot work without.
+ *
+ * The three Twilio variables used to be in this list, which meant an operator
+ * had to open a Twilio account and buy a sender ID before the server would
+ * consider itself configured — for a channel the product refuses outright.
+ * SMS is blocked in two places, at campaign creation and again at send time,
+ * pending STOP handling; the Twilio client is never constructed for a campaign
+ * that can run. Requiring its credentials was setup work for a feature nobody
+ * can reach.
+ *
+ * They are still read below and validated again the day SMS returns. */
 const REQUIRED_VARS = [
   'AWS_REGION',
   'MAIL_ROOT_DOMAIN',
-  'TWILIO_ACCOUNT_SID',
-  'TWILIO_AUTH_TOKEN',
-  'TWILIO_SENDER_ID',
   'SES_WEBHOOK_TOKEN',
   'UNSUBSCRIBE_SECRET',
   'PUBLIC_API_URL'
+];
+
+/* Checked only when an SMS campaign is actually attempted. Kept here so
+ * re-enabling SMS is one line moved, not a hunt through the codebase. */
+export const SMS_REQUIRED_VARS = [
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_SENDER_ID'
 ];
 
 let cached = null;

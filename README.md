@@ -372,6 +372,73 @@ SNS, Route53, IAM — en langage non technique.
 
 ---
 
+## Aller jusqu'à l'envoi automatique des e-mails
+
+Le projet tourne sans rien configurer, mais il n'envoie pas. Voici ce qui
+manque, dans l'ordre, avec ce que ça coûte réellement.
+
+| # | À obtenir | Où | Durée | Sans ça |
+|---|---|---|---|---|
+| 1 | `JWT_SECRET` | `openssl rand -hex 32` | 5 s | les sessions sautent à chaque redémarrage |
+| 2 | `UNSUBSCRIBE_SECRET`, `SES_WEBHOOK_TOKEN` | `openssl rand -hex 32` | 10 s | l'envoi refuse |
+| 3 | Un domaine | votre registrar | déjà fait | pas d'envoi possible |
+| 4 | Compte AWS + zone Route53 | AWS | ~30 min | pas d'envoi possible |
+| 5 | Utilisateur IAM (5 droits) | AWS | ~10 min | pas d'envoi possible |
+| 6 | Accès production SES | AWS, **validation humaine 24-48 h** | ~20 min + attente | 200 e-mails/jour, destinataires vérifiés seulement |
+| 7 | Configuration set + topic SNS | AWS | ~15 min | pas de retour sur les rebonds et plaintes |
+| 8 | Identifiants Google OAuth | Google Cloud Console | ~10 min | connexion Google indisponible (e-mail/mot de passe fonctionne) |
+
+Le seul délai incompressible est l'étape 6 : AWS examine la demande à la main.
+Tout le reste tient dans une après-midi.
+
+**`docs/platform-setup.md`** détaille les étapes 3 à 7 pas à pas, avec les
+réponses prêtes à coller pour le formulaire d'accès production SES.
+**`docs/infrastructure-expliquee.md`** explique à quoi sert chaque brique —
+SES, SNS, Route53, IAM — sans jargon.
+
+### Connexion Google
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → créez un projet.
+2. **API et services → Écran de consentement OAuth** : type « Externe »,
+   renseignez le nom de l'application et votre e-mail de contact.
+3. **Identifiants → Créer → ID client OAuth → Application Web**.
+4. Dans **URI de redirection autorisés**, ajoutez exactement :
+
+   ```
+   http://localhost:3001/api/auth/google/callback
+   ```
+
+   et, en production, la même chose avec l'adresse de votre backend. Chaque
+   environnement a besoin de la sienne — c'est l'oubli qui provoque
+   `redirect_uri_mismatch`.
+
+5. Copiez l'identifiant et le secret dans `.env` :
+
+   ```
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   BACKEND_URL=http://localhost:3001
+   ```
+
+L'URI de redirection pointe vers le **backend**, jamais vers le frontend : le
+backend reçoit le code d'autorisation, l'échange, puis renvoie l'utilisateur
+vers l'application.
+
+### Et vos clients ?
+
+Ils ne configurent rien. À l'inscription, le produit crée leur sous-domaine
+d'envoi, déclare l'identité SES, active DKIM et écrit les DNS dans Route53
+sans intervention. Cette liste est le travail de **l'exploitant**, fait une
+fois.
+
+### Le SMS
+
+Il n'est pas activé, et les identifiants Twilio ne sont donc **pas** requis.
+Le canal est refusé à la création de campagne comme à l'envoi, tant que la
+gestion des réponses `STOP` n'existe pas — obligatoire en France.
+
+---
+
 ## Tests
 
 ```bash

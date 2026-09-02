@@ -64,13 +64,28 @@ test('sesConfigurationSet is null when unset', () => {
 });
 
 test('throws and names every missing variable', () => {
-  withEnv({ AWS_REGION: undefined, TWILIO_AUTH_TOKEN: undefined }, () => {
+  withEnv({ AWS_REGION: undefined, PUBLIC_API_URL: undefined }, () => {
     assert.throws(() => getPlatformConfig(), (err) => {
       assert.match(err.message, /AWS_REGION/);
-      assert.match(err.message, /TWILIO_AUTH_TOKEN/);
+      assert.match(err.message, /PUBLIC_API_URL/);
       assert.doesNotMatch(err.message, /MAIL_ROOT_DOMAIN/);
       return true;
     });
+  });
+});
+
+test('Twilio credentials are not required to boot', () => {
+  // SMS is refused at campaign creation and again at send time pending STOP
+  // handling, so the Twilio client is never built for a campaign that can
+  // run. Demanding an account and a purchased sender ID before the server
+  // considers itself configured was setup work for a feature nobody can
+  // reach. This pins that, so re-adding them is a deliberate act.
+  withEnv({
+    TWILIO_ACCOUNT_SID: undefined,
+    TWILIO_AUTH_TOKEN: undefined,
+    TWILIO_SENDER_ID: undefined
+  }, () => {
+    assert.doesNotThrow(() => getPlatformConfig());
   });
 });
 
