@@ -79,8 +79,12 @@ Copy-Item .env.example .env
 ```
 
 Ouvrez `.env` et renseignez au minimum `JWT_SECRET`. Voir
-[Configuration](#configuration-env) pour le reste — le projet démarre sans les
-clés AWS, il refusera simplement d'envoyer des e-mails.
+[Configuration](#configuration-env) pour le reste.
+
+L'envoi d'e-mails fonctionne sous Docker exactement comme en natif : les
+identifiants du `.env` sont transmis aux conteneurs. Sans eux le projet
+démarre quand même — prospection, campagnes, suivi restent utilisables —
+seul l'envoi refuse, avec un avertissement explicite au démarrage.
 
 > Pas besoin de toucher à `DATABASE_URL` : Docker fournit sa propre base et
 > écrase cette valeur.
@@ -273,9 +277,17 @@ environnement (local, préproduction, production) a besoin de la sienne.
 `MAIL_ROOT_DOMAIN`, `SES_WEBHOOK_TOKEN`, `UNSUBSCRIBE_SECRET`,
 `PUBLIC_API_URL`.
 
-Sans elles, le backend démarre et affiche un avertissement en clair : la
-prospection fonctionne, l'envoi refuse. Voir `docs/platform-setup.md` pour la
-mise en place AWS complète.
+Le backend le vérifie au démarrage et le dit clairement :
+
+```
+Validating platform configuration...
+Platform configuration OK.
+```
+
+Si une variable manque, il démarre quand même avec un avertissement en clair.
+Tout le produit reste utilisable — recherche, campagnes, suivi — seul l'envoi
+refuse. Il faut en plus que le sous-domaine d'envoi du compte soit `verified`,
+ce que la page Configurations affiche.
 
 Générez les deux secrets vous-même :
 
@@ -283,7 +295,38 @@ Générez les deux secrets vous-même :
 openssl rand -hex 32
 ```
 
+Voir `docs/platform-setup.md` pour la mise en place AWS complète.
+
 > `.env` est ignoré par Git. Ne le committez jamais.
+
+### Ces identifiants ne se partagent pas
+
+Ils appartiennent à **l'exploitant de la plateforme**, pas à qui clone le
+dépôt. Ce sont eux qui donnent accès au compte AWS SES et au domaine
+`witechagency.com`.
+
+Quelqu'un qui récupère le dépôt obtient le code, pas les clés — c'est
+volontaire. S'il pouvait envoyer avec vos identifiants :
+
+- les envois seraient **facturés sur votre compte AWS** ;
+- ils partiraient **de votre domaine** ;
+- la moindre plainte pour spam abîmerait **votre réputation d'expéditeur**,
+  et AWS suspendrait **votre** compte SES.
+
+C'est précisément ce que l'architecture en sous-domaines par client existe
+pour éviter — un `.env` partagé la contournerait entièrement. Committer des
+clés AWS dans un dépôt est aussi un incident de sécurité immédiat : des robots
+scannent GitHub en continu et les exploitent en quelques minutes.
+
+Pour qu'un tiers puisse envoyer, deux voies :
+
+- **il utilise votre instance déployée** — c'est un client du SaaS, il n'a pas
+  besoin de faire tourner l'infrastructure ;
+- **il fournit son propre compte AWS SES** et son propre domaine, en
+  renseignant son `.env`.
+
+Un développeur qui reprend le projet n'a de toute façon pas besoin d'envoyer
+pour travailler : tout le reste tourne sans ces variables.
 
 ---
 
