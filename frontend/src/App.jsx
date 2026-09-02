@@ -29,81 +29,13 @@ const API_HOST = import.meta.env.VITE_API_URL ||
     : `http://${window.location.hostname}:3001`);
 
 // Dynamic Fallback leads for premium initial visual seeding
-const INITIAL_FALLBACK_LEADS = [
-  {
-    id: 991,
-    name: 'Millet Plomberie Rénovation',
-    category: 'Plombier',
-    website: 'https://www.witechagency.com',
-    phone: '01 42 33 88 12',
-    email: null,
-    google_maps_url: 'https://www.google.com/maps/search/?api=1&query=Millet+Plomberie+Paris',
-    status: 'New',
-    city: 'Paris',
-    address: '45 Rue de Rivoli, 75001 Paris',
-    rating: 4.6,
-    review_count: 87,
-    social_handles: JSON.stringify({ facebook: 'https://facebook.com/milletplomberie', instagram: null, linkedin: null }),
-    notes: 'Prospect sans email identifié sur Google Maps. Cliquez sur le globe pour crawler son site internet !',
-    scraped_at: new Date(Date.now() - 3600000 * 2).toISOString()
-  },
-  {
-    id: 992,
-    name: 'Artisan Menuisier Lefebvre & Fils',
-    category: 'Menuisier',
-    website: 'http://www.menuiserie-lefebvre.fr',
-    phone: '06 88 12 44 90',
-    email: 'contact@menuiserie-lefebvre.fr',
-    google_maps_url: 'https://www.google.com/maps/search/?api=1&query=Menuisier+Lefebvre+Lyon',
-    status: 'Contacted',
-    city: 'Lyon',
-    address: '12 Rue de la République, 69001 Lyon',
-    rating: 4.8,
-    review_count: 142,
-    social_handles: null,
-    notes: 'Prospect très intéressé par une automatisation de facturation sous n8n. Réponse reçue hier.',
-    scraped_at: new Date(Date.now() - 3600000 * 24).toISOString()
-  },
-  {
-    id: 993,
-    name: 'Studio Coiffure Design',
-    category: 'Coiffeur',
-    website: '',
-    phone: '04 91 30 20 10',
-    email: 'hello@studio-coiffure-design.fr',
-    google_maps_url: 'https://www.google.com/maps/search/?api=1&query=Studio+Coiffure+Marseille',
-    status: 'Proposal Sent',
-    city: 'Marseille',
-    address: '8 Cours Julien, 13006 Marseille',
-    rating: 3.9,
-    review_count: 34,
-    social_handles: JSON.stringify({ facebook: null, instagram: 'https://instagram.com/studiocoiffuredesign', linkedin: null }),
-    notes: 'Pas de site web — Cible directe pour proposition web design Wi\'Tech.',
-    scraped_at: new Date(Date.now() - 3600000 * 72).toISOString()
-  },
-  {
-    id: 994,
-    name: 'Les Compagnons Ebénistes',
-    category: 'Menuisier',
-    website: 'http://www.compagnons-ebenistes.fr',
-    phone: '05 56 12 77 90',
-    email: 'devis@compagnons-ebenistes.fr',
-    google_maps_url: 'https://www.google.com/maps/search/?api=1&query=Compagnons+Ebenistes+Bordeaux',
-    status: 'New',
-    city: 'Bordeaux',
-    address: '22 Rue Sainte-Catherine, 33000 Bordeaux',
-    rating: 4.2,
-    review_count: 56,
-    social_handles: JSON.stringify({ facebook: 'https://facebook.com/compagnons-ebenistes', instagram: null, linkedin: 'https://linkedin.com/company/compagnons-ebenistes' }),
-    notes: 'Prospect qualifié. Site correct mais aucune automatisation détectée — Cible pour n8n.',
-    scraped_at: new Date().toISOString()
-  }
-];
 
 export default function App() {
   const [activePage, setActivePage] = useState('dashboard');
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Distinguishes an empty account from an API that did not answer.
+  const [leadsError, setLeadsError] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Authentication states
@@ -172,18 +104,23 @@ export default function App() {
     try {
       const res = await fetch(`${API_HOST}/api/leads`);
       if (res.ok) {
-        const data = await res.json();
-        if (data.length === 0) {
-          setLeads(INITIAL_FALLBACK_LEADS);
-        } else {
-          setLeads(data);
-        }
+        /* An empty account stays empty.
+         *
+         * This used to substitute invented prospects whenever the list came
+         * back empty — so a customer signing up saw businesses they had never
+         * searched for, in a CRM whose entire promise is that what it shows
+         * is real. It also hid the failure cases: an API that was down looked
+         * exactly like an account with two prospects in it. */
+        setLeads(await res.json());
+        setLeadsError(null);
       } else {
-        setLeads(INITIAL_FALLBACK_LEADS);
+        setLeads([]);
+        setLeadsError('Impossible de charger vos prospects.');
       }
     } catch (err) {
-      console.warn('Backend API not available. Seeding mock leads for client demonstration.', err);
-      setLeads(INITIAL_FALLBACK_LEADS);
+      console.error('Chargement des prospects impossible:', err);
+      setLeads([]);
+      setLeadsError('Le serveur ne répond pas. Vérifiez que l’API est démarrée.');
     } finally {
       setLoading(false);
     }
@@ -448,7 +385,25 @@ export default function App() {
             <p className="text-sm font-display font-medium tracking-wide">Initialisation de l'écosystème Witech Lead...</p>
           </div>
         ) : (
-          renderActivePage()
+          <>
+            {/* A load failure must never look like an empty account. Without
+                this the dashboard and the prospect list are simply blank,
+                which reads as "you have no data" rather than "we could not
+                reach the server". */}
+            {leadsError && (
+              <div className="mb-5 flex items-center gap-3 rounded-xl border border-line bg-[var(--wt-danger-soft)] px-4 py-3">
+                <span className="text-[var(--wt-danger-fg)] text-sm font-semibold">{leadsError}</span>
+                <button
+                  type="button"
+                  onClick={() => loadLeadsFromApi()}
+                  className="ml-auto text-xs font-semibold text-accent hover:underline cursor-pointer"
+                >
+                  Réessayer
+                </button>
+              </div>
+            )}
+            {renderActivePage()}
+          </>
         )}
       </div>
 

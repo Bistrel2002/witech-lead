@@ -104,6 +104,34 @@ Les suivants démarrent en quelques secondes.
 Le port **5433** est volontaire : il n'entre pas en conflit avec un PostgreSQL
 déjà installé sur la machine.
 
+### Travailler sur vos données existantes
+
+Par défaut, Docker crée **sa propre base, vide et isolée**. C'est voulu : un
+collègue qui clone le dépôt obtient un environnement propre sans toucher à
+quoi que ce soit sur sa machine.
+
+Conséquence à connaître : si vous avez déjà des prospects dans un PostgreSQL
+installé localement, **vous ne les verrez pas** dans la version Docker. Ce
+sont deux bases différentes.
+
+Pour brancher les conteneurs sur votre base locale, ajoutez ceci dans `.env` :
+
+```
+DATABASE_URL=postgresql://host.docker.internal:5432/witech_crm
+```
+
+puis retirez la ligne `DATABASE_URL:` du bloc `backend > environment` dans
+`docker-compose.yml`, sinon elle continuera de l'écraser.
+
+`host.docker.internal` est le nom par lequel un conteneur atteint la machine
+hôte. Il fonctionne sur Docker Desktop (Windows et macOS). Sous Linux,
+ajoutez au service `backend` :
+
+```yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
 ### Commandes utiles
 
 ```bash

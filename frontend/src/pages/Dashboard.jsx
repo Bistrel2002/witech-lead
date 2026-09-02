@@ -99,21 +99,16 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
     setRecentActivities(activities);
   }, [leads]);
 
-  // Fallback Charts if database is empty
-  const defaultCategoryData = [
-    { name: 'Plombiers', count: 12 },
-    { name: 'Menuisiers', count: 8 },
-    { name: 'Coiffeurs', count: 15 },
-    { name: 'Restaurants', count: 20 },
-    { name: 'Solo-preneurs', count: 6 }
-  ];
+  /* No fallback charts.
+   *
+   * These used to draw invented figures — Plombiers 12, Menuisiers 8 — for
+   * any account with no prospects, so a customer's first sight of the
+   * dashboard was a business that did not exist. An empty account now shows
+   * that it is empty.
+   */
+  
 
-  const defaultStatusData = [
-    { name: 'New', value: 25, color: '#7e22ce' },
-    { name: 'Contacted', value: 18, color: 'var(--wt-accent)' },
-    { name: 'Warm', value: 8, color: 'var(--wt-warning)' },
-    { name: 'Replied', value: 10, color: 'var(--wt-success)' }
-  ];
+  
 
   return (
     <div className="space-y-6">
@@ -212,14 +207,14 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
           <h3 className="font-display font-extrabold text-fg text-lg mb-4">Répartition par Catégories</h3>
           <div className="w-full h-64 mt-auto">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={totalLeads > 0 ? categoryChartData : defaultCategoryData}>
+              <BarChart data={categoryChartData}>
                 <XAxis dataKey="name" stroke="var(--wt-fg-subtle)" fontSize={11} tickLine={false} />
                 <YAxis stroke="var(--wt-fg-subtle)" fontSize={11} tickLine={false} axisLine={false} />
                 <Tooltip 
                   contentStyle={{ background: 'var(--wt-surface)', borderColor: 'var(--wt-line)', borderRadius: '8px', color: 'var(--wt-fg)' }}
                 />
                 <Bar dataKey="count" fill="var(--wt-brand-500)" radius={[6, 6, 0, 0]}>
-                  {(totalLeads > 0 ? categoryChartData : defaultCategoryData).map((entry, index) => (
+                  {categoryChartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={index % 2 === 0 ? 'var(--wt-brand-500)' : 'var(--wt-brand-700)'} />
                   ))}
                 </Bar>
@@ -236,7 +231,7 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={totalLeads > 0 ? statusChartData : defaultStatusData}
+                    data={statusChartData}
                     cx="50%"
                     cy="50%"
                     innerRadius={45}
@@ -244,7 +239,7 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
                     paddingAngle={4}
                     dataKey="value"
                   >
-                    {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
+                    {statusChartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -255,7 +250,7 @@ export default function Dashboard({ apiHost, leads = [], reloadLeads }) {
               </ResponsiveContainer>
             </div>
             <div className="flex flex-col gap-2 min-w-[140px]">
-              {(totalLeads > 0 ? statusChartData : defaultStatusData).map((entry, index) => (
+              {statusChartData.map((entry, index) => (
                 <div key={index} className="flex items-center gap-2.5 text-xs text-fg-muted">
                   <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }}></span>
                   <span>{entry.name}: <strong className="text-fg font-bold">{entry.value}</strong></span>

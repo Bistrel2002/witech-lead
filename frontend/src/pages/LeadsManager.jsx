@@ -92,34 +92,6 @@ const PIPELINE_STATUSES = [
   'Closed Lost'
 ];
 
-const getMockDiscussions = (leadId) => {
-  const now = new Date();
-  const formatTime = (daysAgo) => new Date(now.getTime() - daysAgo * 24 * 3600 * 1000).toISOString();
-  
-  if (leadId === 991) {
-    return [
-      { id: 'm1', lead_id: 991, type: 'Note', content: "Prospect identifié sur Google Maps dans la catégorie Plombier. Site internet moderne mais aucune adresse email publique trouvée.", created_at: formatTime(2) }
-    ];
-  }
-  if (leadId === 992) {
-    return [
-      { id: 'm2_1', lead_id: 992, type: 'Call', content: "Appel de suivi : Le gérant (M. Lefebvre) confirme l'intérêt pour l'automatisation de sa facturation via n8n. Rendez-vous planifié pour une démo.", created_at: formatTime(0.5) },
-      { id: 'm2_2', lead_id: 992, type: 'Email', content: "Campagne Outreach : Email automatique envoyé avec la template d'automatisation de processus.", created_at: formatTime(1) }
-    ];
-  }
-  if (leadId === 993) {
-    return [
-      { id: 'm3_1', lead_id: 993, type: 'WhatsApp', content: "Message envoyé sur Instagram : Demande si le salon a déjà envisagé de créer un site internet pour les réservations en ligne.", created_at: formatTime(3) }
-    ];
-  }
-  if (leadId === 994) {
-    return [
-      { id: 'm4_1', lead_id: 994, type: 'Note', content: "Site web analysé (Squarespace). Très propre mais pas de widget de chat ni de formulaire d'automatisation de devis.", created_at: formatTime(1) }
-    ];
-  }
-  return [];
-};
-
 const DATABASE_FIELDS = [
   { key: 'name', label: "Nom de l'entreprise *", required: true, keywords: ['name', 'nom', 'entreprise', 'société', 'company', 'business', 'établissement', 'title'] },
   { key: 'category', label: "Catégorie / Secteur", required: false, keywords: ['category', 'catégorie', 'secteur', 'activité', 'type', 'tags', 'sector', 'job', 'industry'] },
@@ -759,10 +731,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
       if (response.ok) {
         setDiscussions(await response.json());
       } else {
-        setDiscussions(getMockDiscussions(leadId));
+        setDiscussions([]);
       }
     } catch (err) {
-      setDiscussions(getMockDiscussions(leadId));
+      console.error('Historique indisponible:', err);
+      setDiscussions([]);
     } finally {
       setLoadingDiscussions(false);
     }
@@ -794,14 +767,17 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         setDiscussionContent('');
         await fetchDiscussions(leadId);
       } else {
-        const mockNew = { id: `local_${Date.now()}`, lead_id: leadId, type: discussionType, content: discussionContent.trim(), created_at: new Date().toISOString() };
-        setDiscussions([mockNew, ...discussions]);
-        setDiscussionContent('');
+        /* A failed save is reported, never faked.
+         *
+         * This used to insert the entry locally and clear the field, so the
+         * note appeared saved and the text was gone. It was not saved: it
+         * vanished on the next reload, and the salesperson had no idea. The
+         * text stays in the box so it can be retried or copied out. */
+        alert("La note n'a pas pu être enregistrée. Réessayez — votre texte est conservé.");
       }
     } catch (err) {
-      const mockNew = { id: `local_${Date.now()}`, lead_id: leadId, type: discussionType, content: discussionContent.trim(), created_at: new Date().toISOString() };
-      setDiscussions([mockNew, ...discussions]);
-      setDiscussionContent('');
+      console.error('Enregistrement de la note impossible:', err);
+      alert("Le serveur ne répond pas. La note n'a pas été enregistrée ; votre texte est conservé.");
     } finally {
       setAddingDiscussion(false);
     }
@@ -878,7 +854,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
     return flags;
   };
-
 
   return (
     <div className="space-y-6">
@@ -1627,8 +1602,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   </button>
                 </div>
               )}
-
-
 
               {/* Status Selector */}
               <div className="bg-surface-2/60 border border-line/80 rounded-xl p-4 space-y-3">
