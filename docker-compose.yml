@@ -37,9 +37,19 @@ services:
     env_file:
       - .env
     environment:
-      # Overrides whatever .env says: inside the compose network the database
-      # answers to `db`, never to localhost.
-      DATABASE_URL: postgresql://witech:witech@db:5432/witech_crm
+      # Which database the containers use.
+      #
+      # Defaults to the `db` service beside them — a self-contained stack that
+      # touches nothing on the host. Set DOCKER_DATABASE_URL in .env to point
+      # them somewhere else, typically your own PostgreSQL:
+      #
+      #   DOCKER_DATABASE_URL=postgresql://host.docker.internal:5432/witech_crm
+      #
+      # A separate variable from DATABASE_URL on purpose: DATABASE_URL holds a
+      # localhost address for running without Docker, and `localhost` inside a
+      # container means the container itself. Reusing it would silently point
+      # the backend at nothing.
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://witech:witech@db:5432/witech_crm}
       PORT: 3001
       NODE_ENV: development
       BACKEND_URL: http://localhost:3001

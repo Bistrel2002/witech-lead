@@ -104,33 +104,49 @@ Les suivants démarrent en quelques secondes.
 Le port **5433** est volontaire : il n'entre pas en conflit avec un PostgreSQL
 déjà installé sur la machine.
 
-### Travailler sur vos données existantes
+### Récupérer vos données existantes dans Docker
 
-Par défaut, Docker crée **sa propre base, vide et isolée**. C'est voulu : un
-collègue qui clone le dépôt obtient un environnement propre sans toucher à
-quoi que ce soit sur sa machine.
+Docker démarre avec **sa propre base, vide**. C'est voulu : quelqu'un qui
+clone le dépôt obtient un environnement propre sans toucher à sa machine.
 
-Conséquence à connaître : si vous avez déjà des prospects dans un PostgreSQL
-installé localement, **vous ne les verrez pas** dans la version Docker. Ce
-sont deux bases différentes.
+Si vous avez déjà des prospects dans un PostgreSQL local, vous ne les verrez
+donc pas — ce sont deux bases différentes. Pour les copier dans celle de
+Docker :
 
-Pour brancher les conteneurs sur votre base locale, ajoutez ceci dans `.env` :
+```bash
+docker compose stop backend
+docker compose exec -T db psql -q -U witech -d postgres -c "DROP DATABASE IF EXISTS witech_crm"
+docker compose exec -T db psql -q -U witech -d postgres -c "CREATE DATABASE witech_crm"
+pg_dump --no-owner --no-privileges witech_crm | docker compose exec -T db psql -q -U witech -d witech_crm
+docker compose start backend
+```
+
+Le `DROP` / `CREATE` n'est pas optionnel : importer par-dessus le schéma que
+le backend a déjà créé produit des dizaines d'erreurs de clés dupliquées et
+un import à moitié fait — les prospects passent, les campagnes non.
+
+C'est une copie, pas un lien. Les deux bases évoluent ensuite séparément.
+
+<details>
+<summary>Faire pointer Docker sur votre base locale (déconseillé)</summary>
+
+`DOCKER_DATABASE_URL` dans `.env` redirige les conteneurs ailleurs :
 
 ```
-DATABASE_URL=postgresql://host.docker.internal:5432/witech_crm
+DOCKER_DATABASE_URL=postgresql://<utilisateur>@host.docker.internal:5432/witech_crm
 ```
 
-puis retirez la ligne `DATABASE_URL:` du bloc `backend > environment` dans
-`docker-compose.yml`, sinon elle continuera de l'écraser.
+Deux choses à savoir avant d'essayer :
 
-`host.docker.internal` est le nom par lequel un conteneur atteint la machine
-hôte. Il fonctionne sur Docker Desktop (Windows et macOS). Sous Linux,
-ajoutez au service `backend` :
+- **Le nom d'utilisateur est obligatoire.** En local, PostgreSQL prend celui
+  de votre session ; dans un conteneur, c'est `root`, et la connexion est
+  refusée avec `no PostgreSQL user name specified`.
+- **PostgreSQL n'écoute que sur `localhost` par défaut**, et un conteneur
+  arrive par la passerelle Docker. Il faut passer `listen_addresses` à `'*'`
+  dans `postgresql.conf` et ouvrir le sous-réseau Docker dans `pg_hba.conf` —
+  donc exposer votre base sur le réseau. L'import ci-dessus évite tout ça.
 
-```yaml
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-```
+</details>
 
 ### Commandes utiles
 
