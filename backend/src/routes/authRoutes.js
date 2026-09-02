@@ -1,4 +1,5 @@
 import express from 'express';
+import { getJwtSecret } from '../config/secrets.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
@@ -12,7 +13,7 @@ const router = express.Router();
 const generateToken = (user) => {
   return jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, phone: user.phone },
-    process.env.JWT_SECRET || 'witech-secret',
+    getJwtSecret(),
     { expiresIn: '7d' }
   );
 };
@@ -600,7 +601,7 @@ router.post('/verify-portal', (req, res) => {
   // Issue portal session JWT
   const portalToken = jwt.sign(
     { portal },
-    process.env.JWT_SECRET || 'witech-secret',
+    getJwtSecret(),
     { expiresIn: '8h' } // Short expiry for secure portals
   );
 

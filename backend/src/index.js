@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { getJwtSecret } from './config/secrets.js';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
@@ -53,7 +54,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-app.use(cookieParser(process.env.JWT_SECRET || 'witech-secret'));
+app.use(cookieParser(getJwtSecret()));
 
 // Auth Routes (Public)
 app.use('/api/auth', authRouter);

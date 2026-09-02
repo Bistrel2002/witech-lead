@@ -64,7 +64,29 @@ Vérifiez que le démon tourne :
 docker info
 ```
 
-### 2. Créer le fichier de configuration
+### 2. Démarrer
+
+```bash
+docker compose up --build
+```
+
+C'est tout. **Aucune clé à obtenir, aucun fichier à créer.** La base, l'API et
+le frontend démarrent avec des valeurs de développement, et vous pouvez créer
+un compte et travailler immédiatement.
+
+Le backend annonce clairement ce qui manque :
+
+```
+⚠️  Platform configuration incomplete — outreach sending will NOT work.
+    Variables manquantes : AWS_REGION, MAIL_ROOT_DOMAIN, ...
+⚠️  JWT_SECRET absent — clé aléatoire générée pour ce démarrage.
+```
+
+Ce que vous avez sans rien configurer : inscription, connexion, recherche de
+prospects, pipeline, campagnes, tableau de bord. Ce qui manque : l'envoi réel
+des e-mails, qui demande un compte AWS SES.
+
+### 3. Ajouter vos clés — seulement si vous en avez besoin
 
 **macOS / Linux :**
 
@@ -78,22 +100,10 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-Ouvrez `.env` et renseignez au minimum `JWT_SECRET`. Voir
-[Configuration](#configuration-env) pour le reste.
-
-L'envoi d'e-mails fonctionne sous Docker exactement comme en natif : les
-identifiants du `.env` sont transmis aux conteneurs. Sans eux le projet
-démarre quand même — prospection, campagnes, suivi restent utilisables —
-seul l'envoi refuse, avec un avertissement explicite au démarrage.
-
-> Pas besoin de toucher à `DATABASE_URL` : Docker fournit sa propre base et
-> écrase cette valeur.
-
-### 3. Démarrer
-
-```bash
-docker compose up --build
-```
+Tout ce que vous y mettez est transmis aux conteneurs et prend le pas sur les
+valeurs par défaut. Rien n'est obligatoire : ajoutez `JWT_SECRET` pour que vos
+sessions survivent à un redémarrage, les clés AWS pour envoyer, les
+identifiants Google pour la connexion Google.
 
 Le premier lancement prend plusieurs minutes (installation des dépendances).
 Les suivants démarrent en quelques secondes.

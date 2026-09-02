@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../config/secrets.js';
 import { getDb } from '../database/db.js';
 
 // Authenticates standard logged-in users via JWT cookies or Authorization Header
@@ -20,7 +21,7 @@ export async function authenticateUser(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'witech-secret');
+    const decoded = jwt.verify(token, getJwtSecret());
     
     // Verify user still exists in database
     const db = await getDb();
@@ -57,7 +58,7 @@ export function authenticatePortal(portalType) {
     }
 
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'witech-secret');
+      const decoded = jwt.verify(token, getJwtSecret());
       if (decoded.portal !== portalType) {
         return res.status(403).json({ error: 'Jeton de portail non valide pour cet espace.' });
       }

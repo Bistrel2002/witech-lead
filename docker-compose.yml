@@ -34,8 +34,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Optional: the stack starts without it. Anything you do put in .env —
+    # AWS keys, Google OAuth — is passed straight through and takes effect.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       # Which database the containers use.
       #
@@ -54,6 +57,15 @@ services:
       NODE_ENV: development
       BACKEND_URL: http://localhost:3001
       FRONTEND_URL: http://localhost:8080
+      # Development defaults, so `docker compose up` works on a fresh clone
+      # with no secrets to gather. Each is overridden by .env when present.
+      #
+      # These are throwaway values for a local machine and must never reach a
+      # deployed environment: JWT_SECRET is left unset on purpose so the
+      # backend generates a random one per boot and refuses to start in
+      # production without a real one.
+      ADMIN_PORTAL_PASSWORD: ${ADMIN_PORTAL_PASSWORD:-dev-admin}
+      TEAM_PORTAL_PASSWORD: ${TEAM_PORTAL_PASSWORD:-dev-team}
     ports:
       - "3001:3001"
 
