@@ -219,15 +219,41 @@ router.get('/google', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   
-  if (process.env.VITE_MOCK_AUTH !== 'true' && clientId && clientSecret) {
-    // Real Google OAuth 2.0 flow
-    const backendCallback = `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/auth/google/callback`;
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(backendCallback)}&response_type=code&scope=openid%20email%20profile&prompt=select_account`;
-    return res.redirect(googleAuthUrl);
-  } else {
-    // Interactive Mock Google Selector
+  // The fake account chooser is only ever served when mock auth was asked for.
+  if (process.env.VITE_MOCK_AUTH === 'true') {
     return res.redirect('/api/auth/google/mock-chooser');
   }
+
+  /* Missing credentials used to fall through to that same fake chooser.
+   *
+   * Nobody had asked for it: the deployment simply had no GOOGLE_CLIENT_ID, and
+   * the answer was a Google-looking account picker that is not Google. It looks
+   * like the product is broken in some unfathomable way, and nothing anywhere
+   * names the actual cause. Saying it plainly turns a puzzling afternoon into
+   * one line of a log. */
+  if (!clientId || !clientSecret) {
+    const missing = [
+      !clientId && 'GOOGLE_CLIENT_ID',
+      !clientSecret && 'GOOGLE_CLIENT_SECRET'
+    ].filter(Boolean).join(', ');
+    console.error(`Auth: Google sign-in unavailable — ${missing} not set.`);
+    return res.status(503).send(
+      `<!doctype html><html lang="fr"><meta charset="utf-8">` +
+      `<body style="font-family:system-ui;max-width:34rem;margin:4rem auto;line-height:1.6">` +
+      `<h1 style="font-size:1.25rem">Connexion Google indisponible</h1>` +
+      `<p>Ce serveur n'a pas d'identifiants Google : <code>${missing}</code> ` +
+      `${missing.includes(',') ? 'ne sont pas définis' : "n'est pas défini"}.</p>` +
+      `<p>Renseignez-les dans <code>.env</code>, puis recréez le conteneur — ` +
+      `Docker lit ce fichier à la création, pas à chaque démarrage :<br>` +
+      `<code>docker compose up -d --force-recreate backend</code></p>` +
+      `<p>La connexion par e-mail et mot de passe fonctionne en attendant.</p>` +
+      `</body></html>`
+    );
+  }
+
+  const backendCallback = `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/auth/google/callback`;
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(backendCallback)}&response_type=code&scope=openid%20email%20profile&prompt=select_account`;
+  return res.redirect(googleAuthUrl);
 });
 
 // 2. Mock Google Account Chooser
