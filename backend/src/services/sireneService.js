@@ -75,16 +75,75 @@ function principalDirigeant(dirigeants) {
   return { name: '', isCompany: false };
 }
 
-function normalise(row) {
+/* Un code postal appartient-il au departement demande ?
+ *
+ * Trois cas, et les deux derniers cassent un `startsWith` naif :
+ *   - metropole : '74' correspond au prefixe '74'
+ *   - outre-mer : '974' tient sur trois chiffres, pas deux
+ *   - Corse     : '2A' et '2B' partagent tous deux le prefixe postal '20',
+ *                 donc le code postal ne permet PAS de les distinguer. On
+ *                 accepte les deux plutot que de rejeter la Corse entiere :
+ *                 l'etablissement local reste meilleur que le siege.
+ */
+export function inDepartement(codePostal, dep) {
+  const cp = String(codePostal || '');
+  const d = String(dep || '').toUpperCase();
+  if (!cp || !d) return false;
+  if (/^9[78]\d$/.test(d)) return cp.startsWith(d);
+  if (d === '2A' || d === '2B') return cp.startsWith('20');
+  return cp.startsWith(d.padStart(2, '0'));
+}
+
+/* L'etablissement a retenir pour ce prospect.
+ *
+ * Le filtre `departement` de l'API porte sur les ETABLISSEMENTS, pas sur le
+ * siege : une recherche « experts-comptables de Haute-Savoie » remonte
+ * IN EXTENSO DAUPHINE SAVOIE, dont le siege est a La Tronche (38) et dont
+ * deux agences sont a Marnaz et Epagny. Prendre le siege donnerait « La
+ * Tronche » — la mauvaise ville dans le mail, et la mauvaise commune pour la
+ * verification de domaine de l'enrichissement, qui cherche precisement la
+ * commune sur le site.
+ *
+ * Mesure sur 380 entreprises reelles : 0 % d'ecart sur le decolletage du 74
+ * (PME mono-site), mais 29 % sur les experts-comptables du meme departement.
+ * L'API expose deja l'adresse locale dans `matching_etablissements`.
+ */
+function etablissementRetenu(row, filtre = {}) {
   const siege = row.siege || {};
+  const matches = Array.isArray(row.matching_etablissements) ? row.matching_etablissements : [];
+  if (!matches.length) return siege;
+
+  if (filtre.commune) {
+    const exact = matches.find((e) => String(e.code_postal || '') === String(filtre.commune));
+    if (exact) return exact;
+  }
+  if (filtre.departement) {
+    // Le siege convient deja s'il est dans le departement vise.
+    if (inDepartement(siege.code_postal, filtre.departement)) return siege;
+    const local = matches.find((e) => inDepartement(e.code_postal, filtre.departement));
+    if (local) return local;
+  }
+  return siege;
+}
+
+function normalise(row, filtre = {}) {
+  const siege = row.siege || {};
+  const lieu = etablissementRetenu(row, filtre);
   const boss = principalDirigeant(row.dirigeants);
   return {
     siren: row.siren,
     name: row.nom_complet || row.nom_raison_sociale || '',
     naf: row.activite_principale || siege.activite_principale || '',
-    city: siege.libelle_commune || '',
-    postal_code: siege.code_postal || '',
-    address: siege.adresse || '',
+    city: lieu.libelle_commune || '',
+    postal_code: lieu.code_postal || '',
+    address: lieu.adresse || '',
+    /* Le nombre d'etablissements ouverts. Un reseau national a 12 agences
+     * n'est pas le meme prospect qu'un atelier de 20 personnes, et rien
+     * d'autre dans la fiche ne le dit. */
+    etablissements: row.nombre_etablissements_ouverts || 1,
+    /* Vrai quand l'adresse retenue n'est pas celle du siege : le prospect est
+     * une agence locale d'une entreprise pilotee ailleurs. */
+    site_local: lieu !== siege,
     effectif_code: row.tranche_effectif_salarie || 'NN',
     effectif: TRANCHES[row.tranche_effectif_salarie] || 'non renseigné',
     dirigeant: boss.name,
@@ -136,7 +195,7 @@ export async function searchCompanies({
     for (const row of data.results || []) {
       if (!row.siren || seen.has(row.siren)) continue;
       seen.add(row.siren);
-      out.push(normalise(row));
+      out.push(normalise(row, { departement, commune }));
       if (out.length >= limit) break;
     }
     if (out.length >= limit) break;
