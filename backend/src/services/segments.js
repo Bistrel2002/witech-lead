@@ -120,6 +120,26 @@ export function segmentClause(key) {
  * lancer une campagne ». Un segment vide est renvoyé avec 0 plutôt qu'omis,
  * pour que la liste reste stable d'un tirage à l'autre.
  */
+/**
+ * Les prospects qui attendent encore d'etre analyses.
+ *
+ * C'est le chiffre qui manquait a l'ecran : un prospect importe mais jamais
+ * enrichi n'a ni site, ni adresse, ni signal — il n'apparait donc dans AUCUN
+ * segment, et rien ne dit qu'il existe. Mesure sur un compte reel : 173
+ * prospects immobiles en 'To Enrich', invisibles, pendant que l'interface
+ * affichait quatre segments bien remplis.
+ */
+export async function countPending(db, userId) {
+  const row = await db.get(
+    `SELECT COUNT(*) AS n FROM leads
+      WHERE user_id = ?
+        AND COALESCE(site_signals, '') = ''
+        AND (status = 'To Enrich' OR siren IS NOT NULL OR COALESCE(website, '') <> '')`,
+    userId
+  );
+  return Number(row?.n || 0);
+}
+
 export async function countSegments(db, userId) {
   const out = [];
   for (const key of SEGMENT_KEYS) {

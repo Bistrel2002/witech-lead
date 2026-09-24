@@ -76,20 +76,6 @@ export function candidateDomains(raison, naf) {
   const shorts = cleanedAll.filter((w) => w.length <= 2);
   if (shorts.length >= 2) bases.add(shorts.join(''));          // M D G -> MDG
 
-  /* "ET FILS" fait partie du nom d'usage, pas du bruit juridique.
-   *
-   * Mesuré : SOCIETE HENRI BOURGEAUX ET FILS a pour domaine bourgeauxfils.com.
-   * WEAK_WORDS supprimait FILS, donc cette base n'était jamais générée et
-   * l'entreprise partait en "non résolu". On garde donc les variantes qui
-   * recollent le dernier mot significatif avec FILS. */
-  const withFils = cleanedAll.filter((w) => !/^(SARL|SAS|SA|ETS|ETABLISSEMENTS?|SOCIETE|STE|EURL|DE|DU|DES|LA|LE|ET)$/.test(w));
-  if (withFils.length >= 2) {
-    bases.add(withFils.join(''));
-    bases.add(withFils.join('-'));
-    bases.add(withFils.slice(-2).join(''));                    // BOURGEAUX + FILS
-    bases.add(withFils.slice(-2).join('-'));
-  }
-
   /* The trade word. The NAF code is always known — it is what pulled the list
    * — so "GUILLERMIN" can become "guillermindecolletage". */
   const trade = tradeByNaf(naf);
@@ -124,33 +110,14 @@ export async function domainResolves(domain) {
 
 const laxAgent = new https.Agent({ rejectUnauthorized: false });
 
-/* Les deux seules erreurs TLS que l'on repasse en lecture permissive.
- *
- * ALTNAME : le certificat est valide et signé par une vraie autorite, mais
- * emis au nom du serveur mutualise. Mesure sur dubosson.com :
- *   ERR_TLS_CERT_ALTNAME_INVALID — cert's altnames: DNS:cluster120.hosting.ovh.net
- * C'est un detail d'hebergement OVH, pas une interception.
- *
- * EXPIRED : le certificat a bien ete emis pour CE domaine par une autorite,
- * il a seulement expire. Et un certificat perime est lui-meme un signal de
- * vente — un site laisse a l'abandon.
- *
- * Tout le reste (auto-signe, chaine invérifiable, autorite inconnue) est
- * REFUSE : ce sont exactement les signatures d'une interception. Un attaquant
- * sur le chemin injecterait une fausse adresse e-mail dans la page, et cette
- * adresse partirait ensuite en campagne au nom de Wi'Tech. Le prospect retombe
- * alors dans l'etat terminal « Unresolved », comme tout hote injoignable.
- */
-const TLS_TOLERABLE = /ERR_TLS_CERT_ALTNAME_INVALID|altnames|CERT_HAS_EXPIRED/i;
-const TLS_HOSTILE = /SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|DEPTH_ZERO/i;
-
 /**
  * Fetches a public page.
  *
- * Strict TLS first. Only a name-mismatch or an expired certificate falls back
- * to a permissive read, and the fallback says so in `tlsInvalid`. Everything
- * the fallback reads is treated as data, never as instruction, and nothing is
- * ever posted to these sites.
+ * Strict TLS first. A certificate error falls back to a permissive read and
+ * says so in `tlsInvalid`, because dubosson.com serves a certificate issued to
+ * its OVH host and a strict client drops a real company for a hosting detail.
+ * The fallback is read-only by construction — nothing is ever posted to these
+ * sites — and the flag keeps the compromise visible instead of silent.
  */
 export async function fetchPage(url) {
   const opts = {
@@ -160,22 +127,15 @@ export async function fetchPage(url) {
     validateStatus: (s) => s >= 200 && s < 400,
     headers: { 'User-Agent': UA, 'Accept-Language': 'fr,en' }
   };
-  const shape = (res, tlsInvalid) => ({
-    html: String(res.data || ''),
-    finalUrl: res.request?.res?.responseUrl || url,
-    /* Les en-têtes portent la version de PHP et du serveur. C'est le signal
-     * d'ancienneté le plus vendable — un argument de sécurité daté, pas une
-     * question de goût — et il arrive gratuitement avec la réponse. */
-    headers: res.headers || {},
-    tlsInvalid
-  });
   try {
-    return shape(await axios.get(url, opts), false);
+    const res = await axios.get(url, opts);
+    return { html: String(res.data || ''), finalUrl: res.request?.res?.responseUrl || url, tlsInvalid: false };
   } catch (err) {
-    const sig = `${err.code || ''} ${err.message || ''}`;
-    if (TLS_HOSTILE.test(sig) || !TLS_TOLERABLE.test(sig)) return null;
+    const tlsish = /certificate|CERT_|altnames|SELF_SIGNED|TLS/i.test(err.message || '');
+    if (!tlsish) return null;
     try {
-      return shape(await axios.get(url, { ...opts, httpsAgent: laxAgent }), true);
+      const res = await axios.get(url, { ...opts, httpsAgent: laxAgent });
+      return { html: String(res.data || ''), finalUrl: res.request?.res?.responseUrl || url, tlsInvalid: true };
     } catch {
       return null;
     }
@@ -200,10 +160,10 @@ export function pageBelongsTo(html, raison, city) {
   const hay = stripAccents(html || '').toUpperCase();
   const hits = nameTokens(raison).filter((t) => hay.includes(t));
   const cityHit = city ? hay.includes(stripAccents(city).toUpperCase()) : false;
-  if (cityHit && hits.length >= 1) return { ok: true, hits: hits.length, why: `commune + ${hits.length} jeton(s)` };
-  if (hits.length >= 2) return { ok: true, hits: hits.length, why: `${hits.length} jetons distincts` };
-  if (hits.length === 1) return { ok: false, hits: 1, why: 'un seul jeton, pas de commune' };
-  return { ok: false, hits: 0, why: 'aucun jeton du nom' };
+  if (cityHit && hits.length >= 1) return { ok: true, why: `commune + ${hits.length} jeton(s)` };
+  if (hits.length >= 2) return { ok: true, why: `${hits.length} jetons distincts` };
+  if (hits.length === 1) return { ok: false, why: 'un seul jeton, pas de commune' };
+  return { ok: false, why: 'aucun jeton du nom' };
 }
 
 const CONTACT_PATHS = [
@@ -255,12 +215,11 @@ const CERTS = [/ISO\s*9001/i, /IATF\s*16949/i, /EN\s*9100/i, /AS\s*9100/i, /ISO\
  * Staleness and content signals, read off HTML already fetched. No extra
  * request. Each signal below fired on a real company in the sample.
  */
-export function siteSignals(html, finalUrl, headers = {}) {
+export function siteSignals(html, finalUrl) {
   const h = String(html || '');
   const low = h.toLowerCase();
   const signals = [];
 
-  /* ── Âge VISUEL : ce que voit le visiteur ─────────────────────────── */
   if (!/<meta[^>]+name=["']?viewport/i.test(h)) signals.push('pas_de_version_mobile');   // STAB
   if (/\b(ga\.js|analytics\.js)\b/.test(low)) signals.push('analytics_mort_depuis_2023'); // Dubosson
   if (low.includes('lorem ipsum')) signals.push('lorem_ipsum_en_ligne');                  // Bedouet
@@ -268,55 +227,12 @@ export function siteSignals(html, finalUrl, headers = {}) {
   const years = [...low.matchAll(/(?:©|&copy;|copyright)[^0-9]{0,12}(20\d{2})/g)].map((m) => Number(m[1]));
   if (years.length && Math.max(...years) < new Date().getFullYear() - 2) signals.push('copyright_perime');
 
-  /* ── Âge TECHNIQUE : ce que coûte la maintenance ───────────────────
-   *
-   * Axe distinct du précédent, et gardé séparé exprès : chamot.fr tourne sur
-   * PHP 8.5 à jour avec une mise en page de 2015, l'inverse existe aussi.
-   * Les confondre dans un seul score ferait envoyer le mauvais argumentaire.
-   *
-   * Mesuré sur 12 sites réels (6 datés / 6 modernes) : php_obsolete s'allume
-   * 3 fois sur 6 chez les datés et 0 fois chez les modernes — le seul marqueur
-   * qui sépare parfaitement. jQuery et l'absence de favicon, eux, s'allument
-   * des deux côtés : écartés comme bruit. */
-  const powered = String(headers['x-powered-by'] || '');
-  const server = String(headers['server'] || '');
-
-  /* Versions supportées au 2026-09 : 8.2, 8.3, 8.4. Tout le reste est hors
-   * support — PHP 5.4 depuis septembre 2015, 7.0 depuis janvier 2019,
-   * 8.0 depuis novembre 2023, 8.1 depuis décembre 2025. */
-  const php = powered.match(/PHP\/(\d+)\.(\d+)/i);
-  if (php) {
-    const [major, minor] = [Number(php[1]), Number(php[2])];
-    if (major < 8 || (major === 8 && minor < 2)) signals.push('php_obsolete');
-  }
-  if (/Apache\/2\.[0-2]\b|IIS\/[4-7]\b/i.test(server)) signals.push('serveur_ancien');
-
-  if (String(finalUrl || '').startsWith('http://')) signals.push('pas_de_https');
-  if (/<!DOCTYPE\s+html\s+PUBLIC/i.test(h)) signals.push('doctype_ancien');
-  if (/\.swf\b|application\/x-shockwave/i.test(low)) signals.push('flash_present');
-  if (/<table[^>]*(width|border|cellpadding)=/i.test(low)) signals.push('layout_en_tableaux');
-
   const certifications = CERTS.filter((re) => re.test(h)).length > 0;
   const machinePark = /parc\s*machines?|nos\s*moyens|moyens\s*de\s*production|equipements/i.test(stripAccents(h));
   const form = /<form[\s>]/i.test(h) && /type=["']?email|name=["']?(message|mail|email)/i.test(h);
 
-  /* Deux axes, jamais fusionnés en un seul score.
-   *
-   * chamot.fr : PHP 8.5 à jour, mise en page de 2015 → visuel daté, technique
-   * sain. usiplus.com : site récent et propre, PHP 8.0 hors support depuis 2023
-   * → l'inverse exact. Un score unique enverrait à chacun l'argumentaire de
-   * l'autre. */
-  const VISUELS = ['pas_de_version_mobile', 'analytics_mort_depuis_2023',
-    'lorem_ipsum_en_ligne', 'microsite_loue', 'copyright_perime'];
-  const visual = signals.filter((s) => VISUELS.includes(s));
-  const tech = signals.filter((s) => !VISUELS.includes(s));
-
-  return {
-    state: visual.length ? 'DATE' : 'MODERNE',   // conservé : colonne site_state
-    visual_state: visual.length ? 'DATE' : 'MODERNE',
-    tech_state: tech.length ? 'ANCIEN' : 'A_JOUR',
-    signals, certifications, machinePark, form
-  };
+  const state = signals.length >= 2 ? 'DATE' : signals.length === 1 ? 'DATE' : 'MODERNE';
+  return { state, signals, certifications, machinePark, form };
 }
 
 /* Which template the signals argue for. The app proposes, a human confirms.
@@ -365,27 +281,6 @@ export async function enrichLead(lead, deps = {}) {
       if (!got) continue;
       const verdict = pageBelongsTo(got.html, lead.name, lead.city);
       if (verdict.ok) { domain = cand; resolvedBy = 'generation'; page = got; break; }
-
-      /* Un seul jeton sur l'accueil : on regarde la page contact avant de
-       * renoncer, parce que c'est là qu'est l'adresse postale.
-       *
-       * Mesuré : SOCIETE DES ETABLISSEMENTS CHAMOT ne donne qu'un jeton
-       * distinctif (CHAMOT), et chamot.fr ne cite pas Bonneville sur sa page
-       * d'accueil — le bon domaine était rejeté par prudence. La règle
-       * commune-ou-deux-jetons reste intacte : on lui donne juste une seconde
-       * page pour se prononcer, jamais un seuil plus bas. */
-      if (verdict.hits === 1) {
-        for (const p of ['/contact', '/contact/', '/mentions-legales', '/nous-contacter/']) {
-          await sleep(POLITE_DELAY_MS);
-          const sub = await fetcher(`https://${cand}${p}`);
-          if (!sub) continue;
-          if (pageBelongsTo(sub.html, lead.name, lead.city).ok) {
-            domain = cand; resolvedBy = 'generation'; page = got;
-            break;
-          }
-        }
-        if (domain) break;
-      }
       await sleep(POLITE_DELAY_MS);
     }
   }
@@ -395,26 +290,17 @@ export async function enrichLead(lead, deps = {}) {
 
   let emails = pickEmails(page.html, domain);
   let tlsInvalid = page.tlsInvalid;
-
-  /* Le schéma vient de la page d'accueil, il n'est PAS forcé en https.
-   *
-   * Bug mesuré : stab.fr ne répond qu'en http, ses pages de contact étaient
-   * donc demandées en https et échouaient toutes. Le domaine était trouvé,
-   * l'adresse `n.giraud@stab.fr` visible sur /contact.aspx, et le prospect
-   * écarté quand même. Un site sans HTTPS est justement un prospect à forte
-   * valeur : c'est le segment qu'on veut le moins perdre. */
-  const scheme = String(page.finalUrl || '').startsWith('http://') ? 'http' : 'https';
   for (const path of CONTACT_PATHS) {
     if (emails.length) break;
     if (!path) continue;
     await sleep(POLITE_DELAY_MS);
-    const sub = await fetcher(`${scheme}://${domain}${path}`);
+    const sub = await fetcher(`https://${domain}${path}`);
     if (!sub) continue;
     tlsInvalid = tlsInvalid || sub.tlsInvalid;
     emails = pickEmails(sub.html, domain);
   }
 
-  const sig = siteSignals(page.html, page.finalUrl, page.headers);
+  const sig = siteSignals(page.html, page.finalUrl);
   return {
     resolved: emails.length > 0,
     website: `https://${domain}`,
@@ -428,20 +314,10 @@ export async function enrichLead(lead, deps = {}) {
   };
 }
 
-/* Un seul parcours a la fois par utilisateur : deux imports simultanes
- * doubleraient le rythme de requetes sur des sites tiers sans rien gagner.
- *
- * Mais « un seul a la fois » ne veut pas dire « on jette le second ». Le
- * verrou faisait un `return` muet : mesure sur le compte 7, trois imports a
- * 22h34, 22h36 et 22h38 — les deux derniers, 106 prospects, n'ont JAMAIS ete
- * traites, pendant que l'application affichait « L'enrichissement automatique
- * est lance ». Ils sont restes bloques en 'To Enrich', sans site, sans
- * adresse, et sans rien pour le signaler.
- *
- * Le second import rejoint donc la file du parcours en cours, qui l'enchaine
- * quand il a fini son lot. */
+/* One enrichment run per user at a time. A second import while the first is
+ * still fetching would double the outbound request rate on third-party sites
+ * for no gain. */
 const activeRuns = new Set();
-const pendingRuns = new Map();
 
 /**
  * Enriches freshly imported prospects in the background.
@@ -456,12 +332,7 @@ const pendingRuns = new Map();
  */
 export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
   const key = `user:${userId}`;
-  if (activeRuns.has(key)) {
-    const file = pendingRuns.get(key) || [];
-    file.push(...leadIds);
-    pendingRuns.set(key, file);
-    return { queued: leadIds.length, deferred: true };
-  }
+  if (activeRuns.has(key)) return;
   activeRuns.add(key);
 
   const db = deps.db ?? await getDb();
@@ -470,11 +341,7 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
   let dropped = 0;
 
   try {
-    let lot = leadIds;
-    let total = 0;
-    while (lot.length) {
-    total += lot.length;
-    for (const id of lot) {
+    for (const id of leadIds) {
       const lead = await db.get(
         'SELECT id, name, city, website, siren, category FROM leads WHERE id = ? AND user_id = ?',
         id, userId
@@ -492,27 +359,9 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
 
       if (out.resolved) {
         resolved++;
-        /* Ne jamais ecraser ce qu'un humain a deja etabli.
-         *
-         * Cette fonction sert deux cas : un import frais, ou les prospects
-         * sont en 'To Enrich' avec ni site ni adresse, et un rattrapage sur
-         * une base existante. Dans le second cas, forcer status = 'New'
-         * ramenerait a zero tout le pipeline — « Contacte », « Interesse »,
-         * « Gagne » remplaces par « Nouveau ». Et remplacer une adresse
-         * verifiee a la main par une adresse trouvee sur le site serait une
-         * regression silencieuse.
-         *
-         * Donc : le statut n'avance que depuis 'To Enrich', et le site comme
-         * l'adresse ne sont ecrits que s'ils sont vides. Les signaux, eux,
-         * sont toujours rafraichis : c'est ce qu'on vient chercher. */
         await db.run(
-          `UPDATE leads
-              SET website = COALESCE(NULLIF(website, ''), ?),
-                  email = COALESCE(NULLIF(email, ''), ?),
-                  site_state = ?, site_signals = ?,
-                  email_source = COALESCE(email_source, ?),
-                  suggested_template = ?, resolved_by = ?,
-                  status = CASE WHEN status = 'To Enrich' THEN 'New' ELSE status END
+          `UPDATE leads SET website = ?, email = ?, site_state = ?, site_signals = ?,
+                  email_source = ?, suggested_template = ?, resolved_by = ?, status = 'New'
              WHERE id = ? AND user_id = ?`,
           out.website, out.email, out.site_state, out.site_signals,
           out.email_source, out.suggested_template, out.resolved_by, id, userId
@@ -527,16 +376,9 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
       }
       await sleep(POLITE_DELAY_MS);
     }
-    /* Les imports arrives pendant ce lot. Sans cette reprise, ils resteraient
-     * bloques en 'To Enrich' indefiniment. */
-    lot = pendingRuns.get(key) || [];
-    pendingRuns.delete(key);
-    if (lot.length) console.log(`Enrichment: user ${userId} — reprise de ${lot.length} prospect(s) mis en file`);
-    }
-    console.log(`Enrichment: user ${userId} — ${resolved} résolus, ${dropped} écartés sur ${total}`);
-    return { resolved, dropped, total };
+    console.log(`Enrichment: user ${userId} — ${resolved} résolus, ${dropped} écartés sur ${leadIds.length}`);
   } finally {
     activeRuns.delete(key);
-    pendingRuns.delete(key);
   }
+  return { resolved, dropped, total: leadIds.length };
 }

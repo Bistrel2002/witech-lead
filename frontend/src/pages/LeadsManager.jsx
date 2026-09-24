@@ -235,6 +235,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [launchResult, setLaunchResult] = useState(null);
   const [enriching, setEnriching] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState('');
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Backward compatibility maps link input
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
@@ -320,7 +321,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const fetchSegments = async () => {
     try {
       const res = await fetch(`${apiHost}/api/leads/segments`, { credentials: 'include' });
-      if (res.ok) setSegments((await res.json()).segments || []);
+      if (res.ok) {
+        const data = await res.json();
+        setSegments(data.segments || []);
+        setPendingCount(Number(data.pending || 0));
+      }
     } catch (err) {}
   };
 
@@ -1450,6 +1455,31 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           )}
         </div>
 
+        {/* Les prospects qui attendent encore l'analyse.
+          *
+          * Un prospect importe mais jamais enrichi n'a aucun signal : il
+          * n'apparait donc dans aucune pastille ci-dessous, et rien ne disait
+          * qu'il existait. Sur un compte reel, 173 prospects sont restes
+          * immobiles et invisibles pendant que quatre segments s'affichaient
+          * normalement. Ce bandeau est le seul endroit qui les montre. */}
+        {pendingCount > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 bg-surface-2 border border-line rounded-xl px-3 py-2.5">
+            <span className="text-xs text-fg">
+              <span className="font-bold">{pendingCount} prospect(s)</span> en attente d'analyse.
+              <span className="text-fg-subtle"> Sans elle, ils n'ont ni site, ni adresse, ni signal, et n'apparaissent dans aucun segment.</span>
+            </span>
+            <button
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent text-white font-semibold text-xs disabled:opacity-50 transition-opacity shrink-0"
+              onClick={handleEnrichExisting}
+              disabled={enriching}
+            >
+              {enriching
+                ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Lancement...</>
+                : <><Sparkles className="w-3.5 h-3.5" /> Analyser maintenant</>}
+            </button>
+          </div>
+        )}
+
         {segments.filter(sg => sg.count > 0).length === 0 ? (
           <div>
           <p className="text-xs text-fg-subtle leading-relaxed">
@@ -1457,15 +1487,6 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             l'enrichissement : un prospect entre avant cette analyse n'en porte aucun,
             meme si son site est en ligne et parfaitement analysable.
           </p>
-          <button
-            className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent text-white font-semibold text-xs disabled:opacity-50 transition-opacity"
-            onClick={handleEnrichExisting}
-            disabled={enriching}
-          >
-            {enriching
-              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Lancement...</>
-              : <><Sparkles className="w-3.5 h-3.5" /> Analyser les prospects existants</>}
-          </button>
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">

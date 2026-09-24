@@ -13,7 +13,7 @@ import {
 } from './services/outreachPolicy.js';
 import { searchCompanies, TRADES, DEFAULT_TRANCHES } from './services/sireneService.js';
 import { runEnrichmentBackground } from './services/enrichmentService.js';
-import { segmentClause, countSegments, SEGMENT_KEYS } from './services/segments.js';
+import { segmentClause, countSegments, countPending, SEGMENT_KEYS } from './services/segments.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
 
@@ -909,7 +909,13 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
 router.get('/leads/segments', async (req, res) => {
   try {
     const db = await getDb();
-    res.json({ segments: await countSegments(db, req.user.id) });
+    res.json({
+      segments: await countSegments(db, req.user.id),
+      /* Les prospects encore non analyses. Sans ce chiffre, un import
+       * interrompu reste invisible : ses prospects n'ont aucun signal, donc
+       * ils n'apparaissent dans aucun segment. */
+      pending: await countPending(db, req.user.id)
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -980,7 +986,15 @@ router.post('/leads/sirene/import', async (req, res) => {
     }
 
     // Fire and forget: the rows fill themselves in.
-    if (inserted.length) runEnrichmentBackground(req.user.id, inserted);
+    /* Lance en tache de fond, mais JAMAIS sans filet : un rejet non capture
+     * ici ne laisse aucune trace, et les prospects restent bloques en
+     * 'To Enrich' sans que rien ne le signale. C'est ce qui s'est produit sur
+     * le compte 7 : logs vides, 173 prospects immobiles. */
+    if (inserted.length) {
+      runEnrichmentBackground(req.user.id, inserted).catch((err) => {
+        console.error(`Enrichment: user ${req.user.id} — parcours interrompu :`, err.message, err.stack);
+      });
+    }
 
     res.status(201).json({
       imported: inserted.length,
@@ -1037,7 +1051,9 @@ router.post('/leads/enrich', async (req, res) => {
     }
 
     // Fire and forget, comme l'import : des centaines de pages a recuperer.
-    runEnrichmentBackground(req.user.id, rows.map((r) => r.id));
+    runEnrichmentBackground(req.user.id, rows.map((r) => r.id)).catch((err) => {
+      console.error(`Enrichment: user ${req.user.id} — rattrapage interrompu :`, err.message, err.stack);
+    });
 
     res.json({
       queued: rows.length,
