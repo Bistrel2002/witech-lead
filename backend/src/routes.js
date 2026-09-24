@@ -11,10 +11,40 @@ import {
   RECONTACT_COOLDOWN_DAYS,
   MAX_CONTACT_ATTEMPTS
 } from './services/outreachPolicy.js';
+import { searchCompanies, TRADES, DEFAULT_TRANCHES } from './services/sireneService.js';
+import { runEnrichmentBackground } from './services/enrichmentService.js';
+import { segmentClause, countSegments, SEGMENT_KEYS } from './services/segments.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
 
 const router = express.Router();
+
+/* Finds the prospect a new one would duplicate, for one tenant.
+ *
+ * SIREN first. It is the only permanent unique identifier a French company
+ * has, and the only key that holds when the same business arrives from two
+ * sources: the register calls it "DRAULT DECOLLETAGE", Maps calls it "Drault
+ * Décolletage", and the name rule below reads those as two companies. Letting
+ * that through means emailing the same business twice from the same campaign.
+ *
+ * The name rule stays as the fallback, unchanged, because most prospects have
+ * no SIREN — everything scraped before the column existed, and everything Maps
+ * will ever return.
+ */
+async function findDuplicateLead(db, userId, lead) {
+  if (lead.siren) {
+    const bySiren = await db.get(
+      'SELECT * FROM leads WHERE siren = ? AND user_id = ?',
+      lead.siren, userId
+    );
+    if (bySiren) return bySiren;
+  }
+  return db.get(
+    `SELECT * FROM leads
+      WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?`,
+    lead.name, lead.category, lead.city || null, lead.website || null, userId
+  );
+}
 
 /** Channels the codebase knows how to address at all. */
 export const SUPPORTED_CHANNELS = new Set(['email', 'sms']);
@@ -233,10 +263,7 @@ router.all('/leads/french-db-lookup', async (req, res) => {
     // If POST, process CRM insertion & campaign linking
     const processedLeads = [];
     for (const biz of businesses) {
-      let targetLead = await db.get(
-        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?', 
-        biz.name, biz.category, biz.city || null, biz.website || null, req.user.id
-      );
+      let targetLead = await findDuplicateLead(db, req.user.id, biz);
 
       // Save to main DB if requested or linking to campaign
       if (!targetLead && (saveToDb !== false || campaignId)) {
@@ -432,10 +459,27 @@ router.post('/leads/french-db-import', async (req, res) => {
 router.get('/leads', async (req, res) => {
   try {
     const db = await getDb();
-    const { category, city, status, hasEmail, hasWebsite } = req.query;
-    
+    const { category, city, status, hasEmail, hasWebsite, segment } = req.query;
+
     let query = 'SELECT * FROM leads WHERE user_id = ?';
     const params = [req.user.id];
+
+    /* Filtre par segment : le signal détecté à l'enrichissement.
+     *
+     * Une clé inconnue est REFUSÉE, jamais ignorée : un segment mal orthographié
+     * qui retomberait sur « tous les prospects » enverrait la campagne à toute
+     * la base avec un argumentaire qui ne s'applique qu'à une fraction. */
+    if (segment) {
+      const clause = segmentClause(segment);
+      if (!clause) {
+        return res.status(400).json({
+          error: `Segment inconnu : ${segment}`,
+          segments_valides: SEGMENT_KEYS
+        });
+      }
+      query += ` AND ${clause.sql}`;
+      params.push(...clause.params);
+    }
 
     if (category) {
       query += ' AND category = ?';
@@ -541,7 +585,7 @@ router.get('/leads/export/csv', async (req, res) => {
 
 // Create lead
 router.post('/leads', async (req, res) => {
-  const { name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles } = req.body;
+  const { name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles, siren } = req.body;
   if (!name || !category) {
     return res.status(400).json({ error: 'Name and Category are required' });
   }
@@ -550,23 +594,16 @@ router.post('/leads', async (req, res) => {
     const db = await getDb();
 
     // Check duplicate before manual creation for this specific user
-    const existing = await db.get(
-      `SELECT id FROM leads 
-       WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?`,
-      name,
-      category,
-      city || null,
-      website || null,
-      req.user.id
-    );
+    const existing = await findDuplicateLead(db, req.user.id, { siren, name, category, city, website });
     if (existing) {
       return res.status(400).json({ error: 'Ce prospect existe déjà dans votre base de données.' });
     }
 
     const result = await db.run(
-      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, social_handles || null
+      `INSERT INTO leads (user_id, name, category, website, phone, email, google_maps_url, city, notes, rating, review_count, address, social_handles, siren, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      req.user.id, name, category, website, phone, email, google_maps_url, city, notes, rating || null, review_count || 0, address || null, social_handles || null,
+      siren || null, siren ? 'sirene' : 'manual'
     );
     const newLead = await db.get('SELECT * FROM leads WHERE id = ?', result.lastID);
     res.status(201).json(newLead);
@@ -713,16 +750,9 @@ router.post('/leads/import', async (req, res) => {
     for (const lead of leadsToInsert) {
       if (!lead.name || !lead.category) continue; // Skip malformed rows
 
-      // Strict duplicate checking: skip if a lead with same name + category + (city OR website) exists for this user
-      const existing = await db.get(
-        `SELECT id FROM leads 
-         WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?`,
-        lead.name,
-        lead.category,
-        lead.city || null,
-        lead.website || null,
-        req.user.id
-      );
+      // Strict duplicate checking: SIREN when the row carries one, otherwise
+      // name + category + (city OR website) for this user.
+      const existing = await findDuplicateLead(db, req.user.id, lead);
 
       if (existing) {
         skippedCount++;
@@ -803,10 +833,7 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
     const processedLeads = [];
     for (const lead of leads) {
       // 1. Check duplicate in local CRM db for this specific user
-      let targetLead = await db.get(
-        'SELECT * FROM leads WHERE name = ? AND category = ? AND (city = ? OR website = ?) AND user_id = ?', 
-        lead.name, lead.category, lead.city || null, lead.website || null, req.user.id
-      );
+      let targetLead = await findDuplicateLead(db, req.user.id, lead);
 
       // 2. Insert to DB if requested or if it doesn't exist and we need to link it to a campaign
       if (!targetLead && (saveToDb !== false || campaignId)) {
@@ -858,6 +885,107 @@ router.post('/leads/scrape-maps-link', async (req, res) => {
       category: finalCategory,
       city: finalCity,
       leads: processedLeads
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* ── Source SIREN : le registre officiel des entreprises ──────────────────
+ *
+ * Distinct du scraper Maps, et volontairement pas fusionné avec lui. Maps
+ * répond « qui est visible ici », le registre répond « qui est immatriculé
+ * dans ce métier, à cette taille ». Aucun paramètre commun, donc deux
+ * formulaires.
+ */
+
+/* Les segments exploitables, avec leur effectif.
+ *
+ * C'est l'écran qui rend les signaux actionnables : « 30 prospects sans version
+ * mobile → lancer la campagne ». Ne compte que les prospects joignables
+ * (`status = 'New'` et une adresse e-mail), donc le chiffre affiché est le
+ * nombre d'envois réels, pas une promesse.
+ */
+router.get('/leads/segments', async (req, res) => {
+  try {
+    const db = await getDb();
+    res.json({ segments: await countSegments(db, req.user.id) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Les métiers proposés dans la liste déroulante, avec leur code NAF.
+router.get('/leads/sirene/trades', (req, res) => {
+  res.json({ trades: TRADES.map(({ label, naf }) => ({ label, naf })) });
+});
+
+/* Aperçu. N'écrit rien : l'utilisateur voit ce qu'il obtiendrait avant que
+ * quoi que ce soit n'entre dans sa base. */
+router.post('/leads/sirene/search', async (req, res) => {
+  const { naf, departement, commune, tranches, limit } = req.body || {};
+  try {
+    const result = await searchCompanies({
+      naf,
+      departement,
+      commune,
+      tranches: tranches || DEFAULT_TRANCHES,
+      limit: Math.min(Number(limit) || 100, 500)
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/* Import, puis enrichissement automatique en tâche de fond.
+ *
+ * Les prospects entrent en 'To Enrich' — état transitoire, pas file d'attente
+ * de travail humain. L'enrichissement les fait basculer en 'New' (joignables,
+ * prêts pour une campagne) ou en 'Unresolved' (écartés, masqués, et personne
+ * n'est invité à les compléter).
+ *
+ * La réponse part immédiatement : cent prospects, c'est des centaines de
+ * récupérations de pages tierces et plusieurs minutes.
+ */
+router.post('/leads/sirene/import', async (req, res) => {
+  const { companies, category } = req.body || {};
+  if (!Array.isArray(companies) || !companies.length) {
+    return res.status(400).json({ error: 'Aucune entreprise à importer.' });
+  }
+
+  try {
+    const db = await getDb();
+    const inserted = [];
+    let skipped = 0;
+
+    for (const c of companies) {
+      if (!c?.name || !c?.siren) { skipped++; continue; }
+      const cat = category || c.naf || 'SIREN';
+      const existing = await findDuplicateLead(db, req.user.id, {
+        siren: c.siren, name: c.name, category: cat, city: c.city, website: null
+      });
+      if (existing) { skipped++; continue; }
+
+      const result = await db.run(
+        `INSERT INTO leads (user_id, name, category, city, address, notes, status,
+                            siren, source, group_key)
+         VALUES (?, ?, ?, ?, ?, ?, 'To Enrich', ?, 'sirene', ?)`,
+        req.user.id, c.name, cat, c.city || null, c.address || null,
+        [c.dirigeant && `Dirigeant : ${c.dirigeant}`, c.effectif && `Effectif : ${c.effectif}`]
+          .filter(Boolean).join(' — ') || null,
+        c.siren, c.group_key || null
+      );
+      inserted.push(result.lastID);
+    }
+
+    // Fire and forget: the rows fill themselves in.
+    if (inserted.length) runEnrichmentBackground(req.user.id, inserted);
+
+    res.status(201).json({
+      imported: inserted.length,
+      skipped,
+      message: `${inserted.length} prospect(s) importé(s). L'enrichissement automatique est lancé : les fiches se complètent toutes seules, celles qui n'aboutissent pas sont écartées.`
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1034,7 +1162,7 @@ router.get('/campaigns', async (req, res) => {
 
 // Create campaign and queue leads
 router.post('/campaigns', async (req, res) => {
-  const { name, template_id, category, lead_ids, channel } = req.body;
+  const { name, template_id, category, lead_ids, channel, segment } = req.body;
   if (!name || !template_id) {
     return res.status(400).json({ error: 'Campaign name and template_id are required' });
   }
@@ -1053,9 +1181,30 @@ router.post('/campaigns', async (req, res) => {
       return res.status(404).json({ error: 'Modèle introuvable ou non autorisé.' });
     }
     
-    // Determine target prospects belonging to this user
+    /* Determine target prospects belonging to this user.
+     *
+     * `segment` est le chemin de la campagne automatique : un signal détecté
+     * sélectionne les prospects, et l'argumentaire du modèle correspond à ce
+     * signal. Sans lui, l'utilisateur ne pouvait viser qu'une catégorie entière
+     * — donc envoyer le même texte à des prospects dont la moitié le
+     * contredit. */
     let targets = [];
-    if (lead_ids && Array.isArray(lead_ids)) {
+    if (segment) {
+      const clause = segmentClause(segment);
+      if (!clause) {
+        return res.status(400).json({
+          error: `Segment inconnu : ${segment}`,
+          segments_valides: SEGMENT_KEYS
+        });
+      }
+      targets = await db.all(
+        `SELECT id FROM leads
+          WHERE user_id = ? AND ${clause.sql}
+            AND COALESCE(email, '') <> ''
+            AND status = 'New'`,
+        req.user.id, ...clause.params
+      );
+    } else if (lead_ids && Array.isArray(lead_ids)) {
       targets = await db.all(
         `SELECT id FROM leads WHERE id IN (${lead_ids.map(() => '?').join(',')}) AND user_id = ?`,
         ...lead_ids, req.user.id
@@ -1063,7 +1212,7 @@ router.post('/campaigns', async (req, res) => {
     } else if (category) {
       targets = await db.all('SELECT id FROM leads WHERE category = ? AND user_id = ?', category, req.user.id);
     } else {
-      return res.status(400).json({ error: 'Must provide either lead_ids or a category' });
+      return res.status(400).json({ error: 'Must provide either segment, lead_ids or a category' });
     }
 
     if (targets.length === 0) {
@@ -1087,33 +1236,50 @@ router.post('/campaigns', async (req, res) => {
      * to try — and leaves the campaign targeting only people it can actually
      * email. The send loop keeps its own version of this for prospects that
      * lose their address between queueing and sending. */
-    const unreachable = { callOnly: 0, lost: 0 };
+    const unreachable = { callOnly: 0, lost: 0, toEnrich: 0 };
     if (channelCheck.channel === 'email' && requested.length) {
       const rows = await db.all(
-        `SELECT id, phone FROM leads
+        `SELECT id, phone, siren FROM leads
           WHERE id IN (${requested.map(() => '?').join(',')})
             AND COALESCE(email, '') = ''`,
         ...requested
       );
       for (const row of rows) {
-        const next = row.phone ? 'Call Only' : 'Closed Lost';
+        /* "No email and no phone" means two different things depending on
+         * where the prospect came from.
+         *
+         * Scraped from Maps, it means Maps had nothing: there is no further
+         * lead to work, so Closed Lost is honest. Pulled from the company
+         * register, it means nobody has looked the company up yet — the
+         * register never carries contact details for anyone. Closing those as
+         * lost would bury a fresh, qualified prospect before it was ever
+         * contacted, and would do it to every single SIREN import. */
+        let next, note;
+        if (row.phone) {
+          next = 'Call Only';
+          note = `Campagne « ${name} » — aucune adresse e-mail, à contacter par téléphone`;
+        } else if (row.siren) {
+          next = 'To Enrich';
+          note = `Campagne « ${name} » — importé du registre SIREN, adresse e-mail à retrouver`;
+        } else {
+          next = 'Closed Lost';
+          note = `Campagne « ${name} » — ni e-mail ni téléphone, prospect inexploitable`;
+        }
         await db.run(
-          "UPDATE leads SET status = ? WHERE id = ? AND status IN ('New', 'Call Only')",
+          "UPDATE leads SET status = ? WHERE id = ? AND status IN ('New', 'Call Only', 'To Enrich')",
           next, row.id
         );
         await db.run(
           'INSERT INTO lead_discussions (lead_id, type, content) VALUES (?, ?, ?)',
-          row.id,
-          'Note',
-          row.phone
-            ? `Campagne « ${name} » — aucune adresse e-mail, à contacter par téléphone`
-            : `Campagne « ${name} » — ni e-mail ni téléphone, prospect inexploitable`
+          row.id, 'Note', note
         ).catch((err) => {
           // The journal records what happened; it is not a precondition for
           // it. Never let a failed note stop a campaign being built.
           console.error(`Campaign: could not record note for lead ${row.id}:`, err.message);
         });
-        if (row.phone) unreachable.callOnly++; else unreachable.lost++;
+        if (row.phone) unreachable.callOnly++;
+        else if (row.siren) unreachable.toEnrich++;
+        else unreachable.lost++;
       }
       const excludedIds = new Set(rows.map((r) => r.id));
       targets = targets.filter((t) => !excludedIds.has(t.id));
@@ -1125,7 +1291,8 @@ router.post('/campaigns', async (req, res) => {
         detail: {
           requested: requested.length,
           movedToCallOnly: unreachable.callOnly,
-          movedToLost: unreachable.lost
+          movedToLost: unreachable.lost,
+          movedToEnrich: unreachable.toEnrich
         }
       });
     }

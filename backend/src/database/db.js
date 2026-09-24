@@ -238,6 +238,46 @@ async function initPostgresDb(db) {
     )
   `);
 
+  /* Prospects pulled from the French company register (SIREN) rather than
+   * scraped from Google Maps.
+   *
+   * The SIREN is the only permanent unique identifier a French company has,
+   * and the only dedup key that survives crossing sources. The register
+   * returns legal names — "DRAULT DECOLLETAGE" — while Maps returns trading
+   * names — "Drault Décolletage". The name-matching rule sees two different
+   * companies there and lets the same business in twice, which ends with it
+   * being emailed twice.
+   *
+   * Partial index: Postgres already treats NULLs as distinct, so this does not
+   * change what is allowed. It keeps the index off the prospects that predate
+   * the column and states the intent — the constraint only means anything for
+   * rows that carry a SIREN.
+   */
+  await db.exec(`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS siren VARCHAR(9);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'maps';
+    CREATE UNIQUE INDEX IF NOT EXISTS leads_user_siren_uniq
+      ON leads (user_id, siren) WHERE siren IS NOT NULL;
+  `);
+
+  /* What the automatic enrichment pass writes back.
+   *
+   * group_key is the one that changes outbound behaviour: prospects sharing a
+   * holding share a buying decision, and mailing three of them the same pitch
+   * is the clearest possible signal that nobody read their file.
+   *
+   * site_state / site_signals / suggested_template decide WHICH pitch to send.
+   * Half the sample had a perfectly good site: telling those their site lacks a
+   * machine park is false and checkable in three seconds. */
+  await db.exec(`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS group_key VARCHAR(160);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS site_state VARCHAR(20);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS site_signals TEXT;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_source VARCHAR(30);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS suggested_template VARCHAR(16);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(20);
+  `);
+
   // Create templates table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS templates (
