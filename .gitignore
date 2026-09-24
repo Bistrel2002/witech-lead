@@ -44,3 +44,6 @@ _bmad-output/
 *.sln
 *.sw?
 .superpowers/
+
+# Surcharge locale a chaque machine (ports deja pris, etc.)
+docker-compose.override.yml
