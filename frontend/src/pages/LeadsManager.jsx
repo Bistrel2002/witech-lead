@@ -81,6 +81,11 @@ function OutreachBadge({ outreach, className = '' }) {
 
 const PIPELINE_STATUSES = [
   'New',
+  // Imported from the SIREN register, which never carries contact details.
+  // Not a stage of the sale either: the prospect is qualified but nobody has
+  // found an address for it yet. Without this bucket every SIREN import lands
+  // in Closed Lost the first time a campaign touches it.
+  'To Enrich',
   // Set by the campaign runner when an email send found no address but the
   // prospect still has a phone number. Not a stage of the sale: a bucket of
   // work that needs a human rather than a send.
@@ -193,7 +198,14 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [scrapingSeconds, setScrapingSeconds] = useState(0);
 
   // New Scraper Options (PRD and user requirements)
-  const [scrapeSource, setScrapeSource] = useState('maps'); // maps, database
+  const [scrapeSource, setScrapeSource] = useState('maps'); // maps, database, sirene
+  /* Source SIREN : le registre officiel. Ses paramètres n'ont rien de commun
+   * avec ceux de Maps — un code d'activité et un département, pas des mots-clés
+   * et une ville — d'où des champs distincts plutôt qu'un formulaire unique. */
+  const [sireneTrades, setSireneTrades] = useState([]);
+  const [sireneNaf, setSireneNaf] = useState('');
+  const [sireneDept, setSireneDept] = useState('');
+  const [sireneLimit, setSireneLimit] = useState(100);
   const [searchCategory, setSearchCategory] = useState('');
   const [searchCity, setSearchCity] = useState('');
   const [searchRadius, setSearchRadius] = useState(5); // default 5km
@@ -236,7 +248,17 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   // Fetch campaigns for queuing select options
   useEffect(() => {
     fetchCampaigns();
+    fetchSireneTrades();
   }, []);
+
+  /* La liste des métiers vient du serveur : les codes NAF y sont déjà
+   * associés, et personne ne doit avoir à en connaître un seul. */
+  const fetchSireneTrades = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/leads/sirene/trades`);
+      if (res.ok) setSireneTrades((await res.json()).trades || []);
+    } catch (err) {}
+  };
 
   const fetchCampaigns = async () => {
     try {
@@ -346,6 +368,47 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const handleLaunchProspecting = async (e) => {
     e.preventDefault();
     
+    /* Le registre SIREN ne partage aucun paramètre avec Maps : un code
+     * d'activité et un département, pas des mots-clés et une ville. Il a donc
+     * sa propre validation et son propre appel, et il sort d'ici. */
+    if (scrapeSource === 'sirene') {
+      if (!sireneNaf || !sireneDept.trim()) {
+        alert('Choisissez un métier et un département.');
+        return;
+      }
+      setMapsScraping(true);
+      try {
+        const found = await fetch(`${apiHost}/api/leads/sirene/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ naf: sireneNaf, departement: sireneDept, limit: sireneLimit })
+        }).then((r) => r.json());
+
+        if (found.error) { alert(found.error); return; }
+        if (!found.companies?.length) {
+          alert("Aucune entreprise trouvée pour ce métier dans ce département.");
+          return;
+        }
+
+        const res = await fetch(`${apiHost}/api/leads/sirene/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ companies: found.companies, category: sireneNaf })
+        }).then((r) => r.json());
+
+        if (res.error) { alert(res.error); return; }
+        alert(`${res.imported} prospect(s) importé(s) sur ${found.total} trouvé(s).\n\n${res.message || ''}`);
+        fetchLeads();
+      } catch (err) {
+        alert(`Erreur : ${err.message}`);
+      } finally {
+        setMapsScraping(false);
+      }
+      return;
+    }
+
     // Validations
     if (scrapeSource === 'maps' && !useRawLink && (!searchCategory.trim() || !searchCity.trim())) {
       alert("Veuillez saisir une catégorie et une ville.");
@@ -824,6 +887,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case 'New': return 'bg-surface-2 border-line text-fg-muted';
+      case 'To Enrich': return 'bg-[var(--wt-warning-soft)] border-line text-[var(--wt-warning-fg)]';
       case 'Call Only': return 'bg-[var(--wt-warning-soft)] border-line text-[var(--wt-warning-fg)]';
       case 'Contacted': return 'bg-accent-soft border-line text-accent';
       case 'Meeting Scheduled': return 'bg-accent-soft border-line text-accent';
@@ -837,6 +901,7 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const getStatusLabel = (status) => {
     const labels = {
       'New': 'Nouveau',
+      'To Enrich': 'À enrichir',
       'Call Only': 'Appel uniquement',
       'Contacted': 'Contacté',
       'Meeting Scheduled': 'RDV Planifié',
@@ -943,16 +1008,61 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
             >
               Google Maps (Direct)
             </button>
-            <button 
-              type="button" 
+            <button
+              type="button"
               className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'database' ? 'bg-surface text-fg shadow-sm' : 'hover:text-fg'}`}
               onClick={() => { setScrapeSource('database'); setUseRawLink(false); }}
             >
               Base Nationale (France CSV)
             </button>
+            <button
+              type="button"
+              className={`flex-1 py-1.5 rounded-md transition-all ${scrapeSource === 'sirene' ? 'bg-surface text-fg shadow-sm' : 'hover:text-fg'}`}
+              onClick={() => { setScrapeSource('sirene'); setUseRawLink(false); }}
+            >
+              Registre SIREN (officiel)
+            </button>
           </div>
 
-          {!useRawLink ? (
+          {scrapeSource === 'sirene' && (
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+              <div className="md:col-span-5">
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Métier</label>
+                <select
+                  className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
+                  value={sireneNaf} onChange={(e) => setSireneNaf(e.target.value)} required
+                >
+                  <option value="">Choisir un métier…</option>
+                  {sireneTrades.map((t) => (
+                    <option key={t.naf} value={t.naf}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Département</label>
+                <input
+                  type="text" className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
+                  placeholder="Ex: 74, 42, 01" maxLength={3}
+                  value={sireneDept} onChange={(e) => setSireneDept(e.target.value.trim())} required
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Nombre max</label>
+                <input
+                  type="number" className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-fg text-xs focus:outline-none focus:border-accent"
+                  min="10" max="500"
+                  value={sireneLimit} onChange={(e) => setSireneLimit(parseInt(e.target.value) || 100)}
+                />
+              </div>
+              <div className="md:col-span-12 text-3xs text-fg-subtle leading-relaxed">
+                Entreprises de 10 à 199 salariés, en activité. Site et e-mail sont
+                retrouvés automatiquement après l'import ; les fiches qui n'aboutissent
+                pas sont écartées, vous n'avez rien à compléter.
+              </div>
+            </div>
+          )}
+
+          {scrapeSource === 'sirene' ? null : !useRawLink ? (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
               <div className={scrapeSource === 'maps' ? 'md:col-span-3' : 'md:col-span-5'}>
                 <label className="block text-3xs font-bold text-fg-subtle uppercase tracking-wider mb-1">Catégorie recherchée</label>
