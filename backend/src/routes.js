@@ -992,6 +992,62 @@ router.post('/leads/sirene/import', async (req, res) => {
   }
 });
 
+/* Rattrapage : calculer les signaux sur les prospects deja en base.
+ *
+ * Les segments sont vides tant qu'aucun prospect n'est passe par
+ * l'enrichissement. Une base constituee avant cette fonctionnalite n'a donc
+ * aucun signal, et l'ecran des segments reste vide alors que les sites sont
+ * la et analysables.
+ *
+ * Par defaut on ne reprend que ce qui manque : un site connu, aucun signal.
+ * `force: true` recalcule tout, pour aller rechercher des signaux ajoutes
+ * depuis (les marqueurs d'anciennete, par exemple).
+ *
+ * L'enrichissement ne touche NI le statut d'un prospect deja dans le pipeline
+ * NI une adresse saisie a la main — voir runEnrichmentBackground.
+ */
+router.post('/leads/enrich', async (req, res) => {
+  const { lead_ids, force } = req.body || {};
+  try {
+    const db = await getDb();
+    let rows;
+
+    if (Array.isArray(lead_ids) && lead_ids.length) {
+      rows = await db.all(
+        `SELECT id FROM leads
+          WHERE user_id = ? AND id IN (${lead_ids.map(() => '?').join(',')})`,
+        req.user.id, ...lead_ids
+      );
+    } else {
+      rows = await db.all(
+        `SELECT id FROM leads
+          WHERE user_id = ?
+            AND (COALESCE(website, '') <> '' OR siren IS NOT NULL)
+            ${force ? '' : "AND COALESCE(site_signals, '') = ''"}
+          ORDER BY id DESC`,
+        req.user.id
+      );
+    }
+
+    if (!rows.length) {
+      return res.json({
+        queued: 0,
+        message: "Rien a enrichir : chaque prospect ayant un site porte deja ses signaux."
+      });
+    }
+
+    // Fire and forget, comme l'import : des centaines de pages a recuperer.
+    runEnrichmentBackground(req.user.id, rows.map((r) => r.id));
+
+    res.json({
+      queued: rows.length,
+      message: `Analyse lancee sur ${rows.length} prospect(s). Les segments se remplissent au fur et a mesure : recharge dans quelques minutes.`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Cleanup duplicate leads from database
 router.post('/leads/cleanup', async (req, res) => {
   try {

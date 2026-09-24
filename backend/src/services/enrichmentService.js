@@ -473,9 +473,27 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
 
       if (out.resolved) {
         resolved++;
+        /* Ne jamais ecraser ce qu'un humain a deja etabli.
+         *
+         * Cette fonction sert deux cas : un import frais, ou les prospects
+         * sont en 'To Enrich' avec ni site ni adresse, et un rattrapage sur
+         * une base existante. Dans le second cas, forcer status = 'New'
+         * ramenerait a zero tout le pipeline — « Contacte », « Interesse »,
+         * « Gagne » remplaces par « Nouveau ». Et remplacer une adresse
+         * verifiee a la main par une adresse trouvee sur le site serait une
+         * regression silencieuse.
+         *
+         * Donc : le statut n'avance que depuis 'To Enrich', et le site comme
+         * l'adresse ne sont ecrits que s'ils sont vides. Les signaux, eux,
+         * sont toujours rafraichis : c'est ce qu'on vient chercher. */
         await db.run(
-          `UPDATE leads SET website = ?, email = ?, site_state = ?, site_signals = ?,
-                  email_source = ?, suggested_template = ?, resolved_by = ?, status = 'New'
+          `UPDATE leads
+              SET website = COALESCE(NULLIF(website, ''), ?),
+                  email = COALESCE(NULLIF(email, ''), ?),
+                  site_state = ?, site_signals = ?,
+                  email_source = COALESCE(email_source, ?),
+                  suggested_template = ?, resolved_by = ?,
+                  status = CASE WHEN status = 'To Enrich' THEN 'New' ELSE status END
              WHERE id = ? AND user_id = ?`,
           out.website, out.email, out.site_state, out.site_signals,
           out.email_source, out.suggested_template, out.resolved_by, id, userId

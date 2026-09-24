@@ -214,6 +214,28 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [targetCampaignId, setTargetCampaignId] = useState('');
   const [campaigns, setCampaigns] = useState([]);
 
+  /* Les segments de prospection : un signal detecte = un argumentaire = une
+   * campagne.
+   *
+   * Les effectifs ET le filtrage viennent du serveur, ou la definition d'un
+   * segment est ecrite UNE seule fois (backend/src/services/segments.js).
+   * La recalculer ici couterait un aller-retour de moins, mais ferait diverger
+   * la liste affichee de la liste reellement ciblee — et tu ecrirais a des
+   * prospects que tu n'as jamais vus a l'ecran. */
+  const [segments, setSegments] = useState([]);
+  const [activeSegment, setActiveSegment] = useState('');
+  const [segmentLeads, setSegmentLeads] = useState(null);
+  const [segmentLoading, setSegmentLoading] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [launchSegment, setLaunchSegment] = useState(null);
+  const [launchName, setLaunchName] = useState('');
+  const [launchTemplateId, setLaunchTemplateId] = useState('');
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState('');
+  const [launchResult, setLaunchResult] = useState(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState('');
+
   // Backward compatibility maps link input
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [useRawLink, setUseRawLink] = useState(false);
@@ -249,7 +271,31 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   useEffect(() => {
     fetchCampaigns();
     fetchSireneTrades();
+    fetchSegments();
+    fetchTemplates();
   }, []);
+
+  /* C'est le serveur qui decide qui appartient au segment. Un aller-retour de
+   * plus, contre la garantie que le tableau montre la meme selection que celle
+   * que la campagne enverra. */
+  useEffect(() => {
+    if (!activeSegment) { setSegmentLeads(null); return; }
+    let cancelled = false;
+    setSegmentLoading(true);
+    (async () => {
+      try {
+        const url = `${apiHost}/api/leads?segment=${encodeURIComponent(activeSegment)}`;
+        const res = await fetch(url, { credentials: 'include' });
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) setSegmentLeads(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!cancelled) setSegmentLeads([]);
+      } finally {
+        if (!cancelled) setSegmentLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeSegment, apiHost]);
 
   /* La liste des métiers vient du serveur : les codes NAF y sont déjà
    * associés, et personne ne doit avoir à en connaître un seul. */
@@ -264,6 +310,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     try {
       const res = await fetch(`${apiHost}/api/campaigns`);
       if (res.ok) setCampaigns(await res.json());
+    } catch (err) {}
+  };
+
+  /* Les effectifs par segment : « 30 prospects sur un serveur PHP hors
+   * support ». Ce sont les prospects REELLEMENT ciblables — statut Nouveau et
+   * adresse connue — pas le total qui porte le signal. Le bouton d'envoi agit
+   * exactement sur ce nombre. */
+  const fetchSegments = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/leads/segments`, { credentials: 'include' });
+      if (res.ok) setSegments((await res.json()).segments || []);
+    } catch (err) {}
+  };
+
+  const fetchTemplates = async () => {
+    try {
+      const res = await fetch(`${apiHost}/api/templates`, { credentials: 'include' });
+      if (res.ok) setTemplates(await res.json());
     } catch (err) {}
   };
 
@@ -297,7 +361,11 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     return { noWebsite };
   }, [leads]);
 
-  const filteredLeads = useMemo(() => leads.filter(lead => {
+  /* Quand un segment est actif, la liste vient du serveur ; sinon c'est celle
+   * deja chargee par le parent. Les autres filtres s'appliquent par-dessus. */
+  const baseLeads = activeSegment && segmentLeads ? segmentLeads : leads;
+
+  const filteredLeads = useMemo(() => baseLeads.filter(lead => {
     const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           lead.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           lead.address?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -319,7 +387,87 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
     }
 
     return matchesSearch && matchesCategory && matchesStatus && matchesEmail && matchesWebsite;
-  }), [leads, searchTerm, activeCategoryTab, selectedStatus, emailFilter, websiteFilter]);
+  }), [baseLeads, searchTerm, activeCategoryTab, selectedStatus, emailFilter, websiteFilter]);
+
+  /* Creer une campagne ciblee sur un segment.
+   *
+   * On envoie la CLE du segment, jamais une liste d'identifiants construite
+   * ici : le serveur refait la selection au moment de l'envoi, donc un
+   * prospect enrichi entre-temps est pris en compte, et un prospect deja
+   * contacte est ecarte par la politique de re-contact. */
+  const handleLaunchSegmentCampaign = async () => {
+    if (!launchSegment) return;
+    if (!launchName.trim()) { setLaunchError('Donne un nom a la campagne.'); return; }
+    if (!launchTemplateId) { setLaunchError('Choisis le modele a envoyer.'); return; }
+
+    setLaunching(true);
+    setLaunchError('');
+    setLaunchResult(null);
+    try {
+      const res = await fetch(`${apiHost}/api/campaigns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: launchName.trim(),
+          template_id: launchTemplateId,
+          segment: launchSegment.key,
+          channel: 'email'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLaunchError(data.error || "La campagne n'a pas pu etre creee.");
+        return;
+      }
+      setLaunchResult(data);
+      fetchCampaigns();
+      fetchSegments();
+      if (reloadLeads) reloadLeads();
+    } catch (err) {
+      setLaunchError(err.message);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  /* Rattrapage : calculer les signaux sur les prospects deja en base.
+   *
+   * Sans ca, une base constituee avant l'enrichissement n'a aucun signal, et
+   * cet ecran reste vide alors que les sites sont la et analysables. */
+  const handleEnrichExisting = async () => {
+    setEnriching(true);
+    setEnrichMessage('');
+    try {
+      const res = await fetch(`${apiHost}/api/leads/enrich`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      setEnrichMessage(res.ok ? (data.message || '') : (data.error || "L'analyse n'a pas pu demarrer."));
+      if (res.ok && data.queued) setTimeout(fetchSegments, 20000);
+    } catch (err) {
+      setEnrichMessage(err.message);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const openLaunchModal = (seg) => {
+    setLaunchSegment(seg);
+    setLaunchName(`${seg.label} — ${new Date().toLocaleDateString('fr-FR')}`);
+    setLaunchTemplateId('');
+    setLaunchError('');
+    setLaunchResult(null);
+  };
+
+  const closeLaunchModal = () => {
+    setLaunchSegment(null);
+    setLaunchResult(null);
+    setLaunchError('');
+  };
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
@@ -1260,6 +1408,93 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
         </div>
       </div>
 
+      {/* Segments : un signal detecte, un argumentaire, une campagne */}
+      <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-accent" />
+            <h3 className="text-sm font-bold text-fg">Segments prets a l'envoi</h3>
+            <span className="text-[11px] text-fg-subtle">
+              un signal detecte = un argumentaire = une campagne
+            </span>
+          </div>
+          {activeSegment && (
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-2 border border-line text-fg-muted text-xs font-semibold hover:bg-surface transition-colors"
+              onClick={() => { setActiveSegment(''); setSelectedLeadIds([]); }}
+            >
+              <X className="w-3.5 h-3.5" />
+              Retirer le filtre
+            </button>
+          )}
+        </div>
+
+        {segments.filter(sg => sg.count > 0).length === 0 ? (
+          <div>
+          <p className="text-xs text-fg-subtle leading-relaxed">
+            Aucun segment exploitable pour l'instant. Les signaux sont calcules a
+            l'enrichissement : un prospect entre avant cette analyse n'en porte aucun,
+            meme si son site est en ligne et parfaitement analysable.
+          </p>
+          <button
+            className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent text-white font-semibold text-xs disabled:opacity-50 transition-opacity"
+            onClick={handleEnrichExisting}
+            disabled={enriching}
+          >
+            {enriching
+              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Lancement...</>
+              : <><Sparkles className="w-3.5 h-3.5" /> Analyser les prospects existants</>}
+          </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {segments.filter(sg => sg.count > 0).map(sg => {
+              const active = activeSegment === sg.key;
+              return (
+                <div
+                  key={sg.key}
+                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-xl border transition-all ${active ? 'bg-accent border-accent text-white shadow-sm' : 'bg-surface-2 border-line text-fg hover:bg-surface'}`}
+                >
+                  <button
+                    className="flex items-center gap-2 text-xs font-semibold"
+                    onClick={() => { setActiveSegment(active ? '' : sg.key); setSelectedLeadIds([]); }}
+                    title={active ? 'Retirer le filtre' : 'Voir ces prospects dans le pipeline'}
+                  >
+                    {sg.priority <= 1 && <AlertTriangle className={`w-3.5 h-3.5 ${active ? 'text-white' : 'text-[var(--wt-danger-fg)]'}`} />}
+                    <span>{sg.label}</span>
+                    <span className={`px-1.5 py-0.5 rounded-lg text-[11px] font-bold ${active ? 'bg-white/20' : 'bg-line/70 text-fg-muted'}`}>
+                      {sg.count}
+                    </span>
+                  </button>
+                  <button
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-colors ${active ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-accent/10 hover:bg-accent/20 text-accent'}`}
+                    onClick={() => openLaunchModal(sg)}
+                    title={`Creer une campagne sur les ${sg.count} prospects de ce segment`}
+                  >
+                    <Send className="w-3 h-3" />
+                    Campagne
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {enrichMessage && (
+          <p className="mt-3 text-[11px] text-fg-muted bg-surface-2 border border-line rounded-xl px-3 py-2">
+            {enrichMessage}
+          </p>
+        )}
+
+        {activeSegment && (
+          <p className="mt-3 text-[11px] text-fg-subtle">
+            {segmentLoading
+              ? 'Chargement du segment...'
+              : `Le pipeline ci-dessous ne montre que ce segment (${segmentLeads ? segmentLeads.length : 0} prospects). Le compteur du bouton, lui, ne compte que ceux qu'une campagne peut atteindre : statut Nouveau et adresse connue.`}
+          </p>
+        )}
+      </div>
+
       {/* Advanced Filters Panel */}
       <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
@@ -2076,6 +2311,130 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                 <button type="button" className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent" onClick={() => setShowImportModal(false)}>Terminer</button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lancer une campagne sur un segment */}
+      {launchSegment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeLaunchModal}>
+          <div
+            className="bg-surface border border-line rounded-2xl w-full max-w-lg shadow-xl"
+            style={{ animation: 'modalFadeIn 0.15s ease-out' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+              <div>
+                <h3 className="text-sm font-bold text-fg">Campagne : {launchSegment.label}</h3>
+                <p className="text-[11px] text-fg-subtle mt-0.5">
+                  {launchSegment.count} prospects ciblables
+                </p>
+              </div>
+              <button className="text-fg-subtle hover:text-fg" onClick={closeLaunchModal}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {launchResult ? (
+              <div className="px-5 py-5 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-bold text-fg">
+                  <Check className="w-4 h-4 text-accent" />
+                  Campagne creee : {launchResult.name}
+                </div>
+                {/* Ce que la politique de re-contact a retire, dit explicitement :
+                    une campagne qui passe de 120 cibles a 12 sans rien dire a
+                    l'air cassee, alors que c'est la regle qui fonctionne. */}
+                <div className="bg-surface-2 border border-line rounded-xl p-3 text-xs text-fg-muted space-y-1">
+                  <div className="flex justify-between">
+                    <span>En file d'envoi</span>
+                    <span className="font-bold text-fg">{launchResult.excluded?.queued ?? 0}</span>
+                  </div>
+                  {launchResult.excluded?.cooling > 0 && (
+                    <div className="flex justify-between">
+                      <span>Ecartes — contactes il y a moins de {launchResult.excluded.cooldownDays} j</span>
+                      <span className="font-semibold">{launchResult.excluded.cooling}</span>
+                    </div>
+                  )}
+                  {launchResult.excluded?.exhausted > 0 && (
+                    <div className="flex justify-between">
+                      <span>Ecartes — {launchResult.excluded.maxAttempts} relances atteintes</span>
+                      <span className="font-semibold">{launchResult.excluded.exhausted}</span>
+                    </div>
+                  )}
+                  {launchResult.excluded?.noEmailCallOnly > 0 && (
+                    <div className="flex justify-between">
+                      <span>Sans e-mail, a appeler</span>
+                      <span className="font-semibold">{launchResult.excluded.noEmailCallOnly}</span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="w-full px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs"
+                  onClick={closeLaunchModal}
+                >
+                  Fermer
+                </button>
+              </div>
+            ) : (
+              <div className="px-5 py-5 space-y-4">
+                <div>
+                  <label className="block text-[11px] font-semibold text-fg-muted mb-1.5">Nom de la campagne</label>
+                  <input
+                    type="text"
+                    className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
+                    value={launchName}
+                    onChange={(e) => setLaunchName(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-fg-muted mb-1.5">
+                    Modele a envoyer
+                  </label>
+                  <select
+                    className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2.5 text-fg text-sm focus:outline-none focus:border-accent"
+                    value={launchTemplateId}
+                    onChange={(e) => setLaunchTemplateId(e.target.value)}
+                  >
+                    <option value="">Choisir un modele...</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  {/* Le nom de modele suggere vient du segment cote serveur. Ce
+                      n'est qu'un repere : c'est toi qui nommes tes modeles. */}
+                  <p className="text-[11px] text-fg-subtle mt-1.5">
+                    Ce segment attend l'argumentaire <span className="font-semibold text-fg-muted">{launchSegment.template}</span>.
+                    {templates.length === 0 && ' Aucun modele enregistre — cree-le dans Campagnes.'}
+                  </p>
+                </div>
+
+                {launchError && (
+                  <div className="flex items-start gap-2 text-[11px] text-[var(--wt-danger-fg)] bg-[var(--wt-danger-soft)] border border-line rounded-xl px-3 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>{launchError}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-surface-2 border border-line text-fg-muted font-semibold text-xs hover:bg-surface transition-colors"
+                    onClick={closeLaunchModal}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs disabled:opacity-50 transition-opacity"
+                    onClick={handleLaunchSegmentCampaign}
+                    disabled={launching || templates.length === 0}
+                  >
+                    {launching
+                      ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Creation...</>
+                      : <><Send className="w-3.5 h-3.5" /> Creer la campagne</>}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
