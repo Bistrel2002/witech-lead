@@ -548,7 +548,10 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
 
         if (res.error) { alert(res.error); return; }
         alert(`${res.imported} prospect(s) importé(s) sur ${found.total} trouvé(s).\n\n${res.message || ''}`);
-        fetchLeads();
+        // `reloadLeads` est le nom du parent ; `fetchLeads` n'existe pas ici et
+        // levait une ReferenceError juste apres le message de succes.
+        if (reloadLeads) await reloadLeads();
+        fetchSegments();
       } catch (err) {
         alert(`Erreur : ${err.message}`);
       } finally {
@@ -1201,6 +1204,24 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
                   min="10" max="500"
                   value={sireneLimit} onChange={(e) => setSireneLimit(parseInt(e.target.value) || 100)}
                 />
+              </div>
+              {/* Le bouton appartient a CE bloc.
+                *
+                * Il vivait auparavant dans la branche Maps/lien-brut, que la
+                * source SIREN court-circuite : les champs s'affichaient et le
+                * bouton disparaissait, donc la recherche etait impossible a
+                * lancer. Chaque source porte desormais le sien. */}
+              <div className="md:col-span-2 flex items-end">
+                <button
+                  type="submit"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs hover:bg-accent active:scale-95 transition-all disabled:opacity-50"
+                  disabled={mapsScraping}
+                >
+                  {mapsScraping
+                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    : <Play className="w-3.5 h-3.5 fill-current" />}
+                  Rechercher
+                </button>
               </div>
               <div className="md:col-span-12 text-3xs text-fg-subtle leading-relaxed">
                 Entreprises de 10 à 199 salariés, en activité. Site et e-mail sont
