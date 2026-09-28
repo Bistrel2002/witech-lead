@@ -1037,7 +1037,7 @@ router.post('/leads/enrich', async (req, res) => {
         `SELECT id FROM leads
           WHERE user_id = ?
             AND (COALESCE(website, '') <> '' OR siren IS NOT NULL)
-            ${force ? '' : "AND COALESCE(site_signals, '') = ''"}
+            ${force ? '' : 'AND resolved_by IS NULL'}
           ORDER BY id DESC`,
         req.user.id
       );

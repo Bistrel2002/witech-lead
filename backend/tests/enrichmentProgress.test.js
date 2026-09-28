@@ -68,3 +68,27 @@ test('un compte sans parcours ne renvoie rien', () => {
   assert.equal(enrichmentProgress(9999), null);
   assert.equal(acknowledgeProgress(9999), false);
 });
+
+/* --- Le compte de « en attente » --------------------------------------- */
+
+import { countPending } from '../src/services/segments.js';
+
+test('un prospect deja analyse puis ecarte ne compte plus comme en attente', async () => {
+  const lignes = [
+    { id: 1, status: 'To Enrich',  resolved_by: null,         siren: '111' }, // en attente
+    { id: 2, status: 'To Enrich',  resolved_by: null,         siren: '222' }, // en attente
+    { id: 3, status: 'Unresolved', resolved_by: 'aucun',      siren: '333' }, // analyse, ecarte
+    { id: 4, status: 'New',        resolved_by: 'generation', siren: '444' }  // analyse, resolu
+  ];
+  const faux = {
+    get: async (sql, userId) => {
+      assert.match(sql, /resolved_by IS NULL/,
+        'le filtre doit porter sur « jamais analyse », pas sur l\'absence de signaux');
+      return { n: lignes.filter((l) => l.resolved_by === null).length };
+    }
+  };
+  // Mesure sur un compte reel : 106 reellement en attente, mais 166 comptes
+  // tant que les 60 ecartes revenaient dans le lot. La banniere ne serait
+  // jamais tombee a zero.
+  assert.equal(await countPending(faux, 7), 2);
+});

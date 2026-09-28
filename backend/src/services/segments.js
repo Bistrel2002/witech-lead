@@ -130,10 +130,17 @@ export function segmentClause(key) {
  * affichait quatre segments bien remplis.
  */
 export async function countPending(db, userId) {
+  /* `resolved_by IS NULL` est le seul marqueur fiable de « jamais analyse ».
+   *
+   * Filtrer sur l'absence de signaux ne suffit pas : un prospect ECARTE en a
+   * aucun non plus. Mesure sur un compte reel — 106 prospects reellement en
+   * attente, mais 166 comptes, parce que les 60 deja analyses et ecartes
+   * revenaient dans le lot. La banniere ne serait jamais tombee a zero et le
+   * bouton aurait re-parcouru sans fin des sites deja juges injoignables. */
   const row = await db.get(
     `SELECT COUNT(*) AS n FROM leads
       WHERE user_id = ?
-        AND COALESCE(site_signals, '') = ''
+        AND resolved_by IS NULL
         AND (status = 'To Enrich' OR siren IS NOT NULL OR COALESCE(website, '') <> '')`,
     userId
   );
