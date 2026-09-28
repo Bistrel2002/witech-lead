@@ -236,6 +236,8 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
   const [enriching, setEnriching] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState('');
   const [pendingCount, setPendingCount] = useState(0);
+  const [enrichProgress, setEnrichProgress] = useState(null);
+  const [enrichDone, setEnrichDone] = useState(null);
 
   // Backward compatibility maps link input
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
@@ -440,9 +442,74 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
    *
    * Sans ca, une base constituee avant l'enrichissement n'a aucun signal, et
    * cet ecran reste vide alors que les sites sont la et analysables. */
+  /* Le suivi de l'enrichissement.
+   *
+   * Un parcours de 200 prospects dure environ une heure. Sans barre, l'ecran
+   * montre une colonne immobile et rien ne distingue « ca travaille » de
+   * « c'est casse ». On interroge donc le serveur toutes les 3 secondes tant
+   * qu'un parcours tourne, et on s'arrete des qu'il est fini : pas de sondage
+   * permanent sur un ecran au repos. */
+  useEffect(() => {
+    let vivant = true;
+    let timer;
+
+    const sonder = async () => {
+      try {
+        const res = await fetch(`${apiHost}/api/leads/enrich/progress`, { credentials: 'include' });
+        if (!res.ok || !vivant) return;
+        const p = await res.json();
+        setPendingCount(Number(p.pending || 0));
+
+        if (p.active) {
+          setEnrichProgress(p);
+          timer = setTimeout(sonder, 3000);
+          return;
+        }
+
+        setEnrichProgress(null);
+        if (p.finished) {
+          setEnrichDone(p);
+          notifierFin(p);
+          /* Acquitte, sinon l'annonce reapparait a chaque rechargement. */
+          fetch(`${apiHost}/api/leads/enrich/ack`, { method: 'POST', credentials: 'include' }).catch(() => {});
+          if (reloadLeads) reloadLeads();
+          fetchSegments();
+        }
+      } catch (err) {
+        /* Un serveur momentanement injoignable ne doit pas arreter le suivi. */
+        if (vivant) timer = setTimeout(sonder, 8000);
+      }
+    };
+
+    sonder();
+    return () => { vivant = false; clearTimeout(timer); };
+  }, [apiHost, enriching]);
+
+  /* La notification systeme : l'attente dure assez longtemps pour qu'on
+   * change d'onglet, et c'est precisement la que l'annonce doit arriver.
+   * Elle est facultative — la banniere dans la page dit la meme chose. */
+  const notifierFin = (p) => {
+    try {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      new Notification('Enrichissement terminé', {
+        body: `${p.resolved} prospect(s) exploitables, ${p.dropped} écartés sur ${p.total}.`,
+        tag: 'witech-enrichment'
+      });
+    } catch (err) { /* navigateur sans notifications : la banniere suffit */ }
+  };
+
   const handleEnrichExisting = async () => {
     setEnriching(true);
     setEnrichMessage('');
+    setEnrichDone(null);
+    /* La permission se demande sur un geste de l'utilisateur, jamais au
+     * chargement : un navigateur refuse la demande spontanee, et un bandeau
+     * surgi sans raison est hostile. */
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+    } catch (err) {}
     try {
       const res = await fetch(`${apiHost}/api/leads/enrich`, {
         method: 'POST',
@@ -1462,7 +1529,66 @@ export default function LeadsManager({ apiHost, leads = [], reloadLeads }) {
           * qu'il existait. Sur un compte reel, 173 prospects sont restes
           * immobiles et invisibles pendant que quatre segments s'affichaient
           * normalement. Ce bandeau est le seul endroit qui les montre. */}
-        {pendingCount > 0 && (
+        {/* La barre d'avancement.
+          *
+          * Le pourcentage seul ne suffit pas : « 34 % » ne dit pas s'il reste
+          * dix minutes ou une heure. On affiche donc aussi le decompte et une
+          * estimation calculee sur le rythme REEL de ce parcours-ci, parce
+          * qu'un lot de sites lents et un lot de sites rapides n'ont pas du
+          * tout la meme duree. */}
+        {enrichProgress && (
+          <div className="mb-3 bg-surface-2 border border-line rounded-xl px-3 py-3">
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <span className="inline-flex items-center gap-2 text-xs font-bold text-fg">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" />
+                Analyse en cours — {enrichProgress.done} / {enrichProgress.total}
+              </span>
+              <span className="text-xs font-bold text-accent">{enrichProgress.percent}%</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-line/70 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-accent transition-all duration-500"
+                style={{ width: `${enrichProgress.percent}%` }}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-fg-subtle flex-wrap">
+              <span>{enrichProgress.resolved} exploitables · {enrichProgress.dropped} écartés</span>
+              {enrichProgress.etaSeconds != null && (
+                <span>
+                  {enrichProgress.etaSeconds > 90
+                    ? `environ ${Math.round(enrichProgress.etaSeconds / 60)} min restantes`
+                    : `moins de 2 min`}
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-fg-subtle">
+              Tu peux fermer cette page : l'analyse continue sur le serveur.
+            </p>
+          </div>
+        )}
+
+        {/* Le bilan de fin. Efface des que tu le fermes. */}
+        {enrichDone && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 bg-accent-soft border border-accent/50 rounded-xl px-3 py-2.5">
+            <span className="inline-flex items-center gap-2 text-xs text-fg">
+              <Check className="w-4 h-4 text-accent shrink-0" />
+              <span>
+                <span className="font-bold">Analyse terminée.</span>{' '}
+                {enrichDone.resolved} prospect(s) exploitables, {enrichDone.dropped} écartés
+                sur {enrichDone.total}.
+              </span>
+            </span>
+            <button
+              className="text-fg-subtle hover:text-fg shrink-0"
+              onClick={() => setEnrichDone(null)}
+              title="Fermer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {pendingCount > 0 && !enrichProgress && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 bg-surface-2 border border-line rounded-xl px-3 py-2.5">
             <span className="text-xs text-fg">
               <span className="font-bold">{pendingCount} prospect(s)</span> en attente d'analyse.

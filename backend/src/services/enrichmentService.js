@@ -443,6 +443,31 @@ export async function enrichLead(lead, deps = {}) {
 const activeRuns = new Set();
 const pendingRuns = new Map();
 
+/* L'avancement d'un parcours, pour que l'ecran puisse le montrer.
+ *
+ * Un enrichissement de 200 prospects dure environ une heure. Sans ce compteur,
+ * l'utilisateur voit une colonne « A enrichir » immobile et ne peut pas
+ * distinguer « ca travaille » de « c'est casse » — c'est exactement la
+ * question qui a ete posee apres deux heures d'attente silencieuse.
+ *
+ * L'etat vit en memoire : il disparait avec le process, comme le parcours
+ * lui-meme. L'ecran retombe alors sur le compte de prospects restant a
+ * analyser, lu en base, qui reste juste dans tous les cas. */
+const runProgress = new Map();
+
+export function enrichmentProgress(userId) {
+  return runProgress.get(`user:${userId}`) || null;
+}
+
+/* Oublie le bilan d'un parcours termine, une fois que l'ecran l'a annonce.
+ * Sans cet acquittement, la notification de fin reapparaitrait a chaque
+ * rechargement de page. */
+export function acknowledgeProgress(userId) {
+  const st = runProgress.get(`user:${userId}`);
+  if (st && st.finishedAt) runProgress.delete(`user:${userId}`);
+  return Boolean(st);
+}
+
 /**
  * Enriches freshly imported prospects in the background.
  *
@@ -460,9 +485,15 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
     const file = pendingRuns.get(key) || [];
     file.push(...leadIds);
     pendingRuns.set(key, file);
+    const st = runProgress.get(key);
+    if (st) st.total += leadIds.length;
     return { queued: leadIds.length, deferred: true };
   }
   activeRuns.add(key);
+  runProgress.set(key, {
+    total: leadIds.length, done: 0, resolved: 0, dropped: 0,
+    startedAt: Date.now(), finishedAt: null
+  });
 
   const db = deps.db ?? await getDb();
   const enrich = deps.enrichLead ?? enrichLead;
@@ -525,6 +556,8 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
           out.resolved_by || 'aucun', id, userId
         );
       }
+      const st = runProgress.get(key);
+      if (st) { st.done++; st.resolved = resolved; st.dropped = dropped; }
       await sleep(POLITE_DELAY_MS);
     }
     /* Les imports arrives pendant ce lot. Sans cette reprise, ils resteraient
@@ -538,5 +571,9 @@ export async function runEnrichmentBackground(userId, leadIds, deps = {}) {
   } finally {
     activeRuns.delete(key);
     pendingRuns.delete(key);
+    /* Le bilan survit au parcours : c'est lui que l'ecran annonce. Il est
+     * efface par l'acquittement, pas ici. */
+    const st = runProgress.get(key);
+    if (st) { st.finishedAt = Date.now(); st.resolved = resolved; st.dropped = dropped; }
   }
 }

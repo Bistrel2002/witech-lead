@@ -12,7 +12,7 @@ import {
   MAX_CONTACT_ATTEMPTS
 } from './services/outreachPolicy.js';
 import { searchCompanies, TRADES, DEFAULT_TRANCHES } from './services/sireneService.js';
-import { runEnrichmentBackground } from './services/enrichmentService.js';
+import { runEnrichmentBackground, enrichmentProgress, acknowledgeProgress } from './services/enrichmentService.js';
 import { segmentClause, countSegments, countPending, SEGMENT_KEYS } from './services/segments.js';
 import { refreshTenantSendingStatus } from './services/tenantProvisioning.js';
 import { buildUnsubscribeUrl } from './services/unsubscribeService.js';
@@ -1062,6 +1062,52 @@ router.post('/leads/enrich', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+/* L'avancement de l'enrichissement en cours.
+ *
+ * Interroge en boucle par l'ecran pendant un parcours. Renvoie trois choses
+ * distinctes, et les confondre serait trompeur :
+ *   - `active`   : un parcours tourne en ce moment
+ *   - `finished` : un parcours vient de se terminer et n'a pas ete annonce
+ *   - `pending`  : ce qu'il reste a analyser d'apres la BASE, qui reste juste
+ *                  meme apres un redemarrage du serveur, la ou l'avancement
+ *                  en memoire, lui, disparait.
+ */
+router.get('/leads/enrich/progress', async (req, res) => {
+  try {
+    const db = await getDb();
+    const st = enrichmentProgress(req.user.id);
+    const pending = await countPending(db, req.user.id);
+
+    if (!st) return res.json({ active: false, finished: false, pending });
+
+    const percent = st.total ? Math.min(100, Math.round((st.done / st.total) * 100)) : 0;
+    res.json({
+      active: !st.finishedAt,
+      finished: Boolean(st.finishedAt),
+      total: st.total,
+      done: st.done,
+      resolved: st.resolved,
+      dropped: st.dropped,
+      percent,
+      /* Le temps restant, estime sur le rythme REEL de ce parcours et non sur
+       * une moyenne inventee : un lot de sites lents et un lot de sites
+       * rapides n'ont pas du tout la meme duree. */
+      etaSeconds: st.done > 0 && !st.finishedAt
+        ? Math.round(((Date.now() - st.startedAt) / st.done) * (st.total - st.done) / 1000)
+        : null,
+      pending
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* Accuse reception du bilan de fin, pour que l'annonce ne se repete pas a
+ * chaque rechargement de page. */
+router.post('/leads/enrich/ack', (req, res) => {
+  res.json({ acknowledged: acknowledgeProgress(req.user.id) });
 });
 
 // Cleanup duplicate leads from database
